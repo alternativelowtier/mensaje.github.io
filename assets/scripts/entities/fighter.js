@@ -1,4 +1,1242 @@
-const CharacterStatsBase = { ... };
+
+
+const CharacterStatsBase = { Yuji: { hp: 1000, speed: 4.5, suitColor: '#181f2f', redColor: '#eb1b31', hairColor: '#f0a3bb' }, Gojo: { hp: 900, speed: 3.8, suitColor: '#080812', redColor: '#000000', hairColor: '#ffffff' }, Yuta: { hp: 950, speed: 4.8, suitColor: '#e0e0e0', pantsColor: '#1a1a1a', hairColor: '#22222b'} };
+
 class Fighter {
-// ...
+constructor(characterName, spawnX, playerId) {
+this.charName = characterName; this.x = spawnX; this.y = GROUND_Y - 30; this.playerId = playerId; this.facingDir = (playerId === 1) ? -1 : 1; 
+this.isCpu = (playerId === 1);
+let stats = CharacterStatsBase[characterName]; this.health = stats.hp; this.maxHealth = stats.hp; this.guardHp = 100; this.spMeter = 0; this.ultMeter = 0;
+this.parryMeter = 100; this.stunTimer = 20; this.velX = 0; this.velY = 0; this.currentState = 'idle'; this.stateFrameTimer = 0; this.cooldowns = {};
+this.isGuardBroken = false; this.isInvulnerable = false; this.isTransformed = false; this.transformTimer = 0; this.comboCounter = 0; this.canContinueCombo = false;
+this.lastTap = { key: null, time: 0 }; this.chargingKey = null; this.mappedChargeKey = null; this.chargeTimer = 0; this.divergentFistTimer = 0; this.blackFlashSuccess = false; this.blackFlashBuff = 0; this.bf_targetX = 0;
+this.comboHits = 0; this.comboTimer = 0; this.comboJustIncremented = false; this.hasUsedDomain = false; this.invulnTimer = 0; this.sukunaDomainBar = 0;
+this.copiedTechnique = "NONE"; this.copiedTechniqueName = "NONE";
+this.copyCharges = 0;
 }
+setState(newState) { if (this.currentState !== newState) { this.currentState = newState; this.stateFrameTimer = 0; if (newState !== 'atk_j') { this.comboCounter = 0; this.canContinueCombo = false; } this.blackFlashSuccess = false; } }
+isUltimateActive() { return (this.charName === 'Yuta' && domainExpansionSystem.isActive && domainExpansionSystem.casterPlayerId === this.playerId) || this.isTransformed; }
+
+receiveDamage(damage, pushback, attacker, isUnblockable, noStun = false, isDomainTick = false, spGainModifier = 1.0) {
+if (this.currentState === 'dead') return; if (this.isInvulnerable) return;
+
+if (domainExpansionSystem.isActive && domainExpansionSystem.casterPlayerId === this.playerId) {
+    if(this.charName === 'Yuta') return; // Yuta is immune inside his own domain
+    let threshold = domainExpansionSystem.getShatterTime() - 120;
+    if (domainExpansionSystem.timer < threshold) { 
+        domainExpansionSystem.isActive = false; domainExpansionSystem.timer = 0; soundManager.play('hitHeavy'); 
+        domainExpansionSystem.galaxyLines = null; domainExpansionSystem.splats = null; domainExpansionSystem.voidStreaks = null; domainExpansionSystem.floatingMathSymbols =[];
+    }
+}
+
+if (this.charName === 'Yuji' && this.currentState === 'ability_o' && this.stateFrameTimer < 40 && !isUnblockable) { this.setState('counter_attack'); this.isInvulnerable = true; this.invulnTimer = 25; gameEngine.hitStopFrames = 15; gameEngine.impactFrame = 2; gameEngine.cameraShake = 20; attacker.receiveDamage(attacker.maxHealth * 0.20, 15, this, true); attacker.velY = -8; spawnHitSparks(this.x + 20*this.facingDir, this.y, '#fff', true); return; }
+if (this.currentState === 'guarding' && !isUnblockable && pushback >= 0) { this.guardHp -= (damage * 1.5); this.parryMeter = Math.min(100, this.parryMeter + damage * 1.5); if (pushback > 0) this.velX = (pushback * 0.3) * attacker.facingDir; spawnHitSparks(this.x, this.y, '#ffd000', false); if (this.guardHp <= 0 && !this.isGuardBroken) { this.isGuardBroken = true; this.setState('guard_broken'); this.velX = -5 * this.facingDir; gameEngine.cameraShake += 8; spawnHitSparks(this.x, this.y, '#ffd000', true); } return; }
+soundManager.play('jojo_punch'); if (attacker && attacker.blackFlashBuff > 0) { damage *= (1 + attacker.blackFlashBuff * 0.15); } this.health -= damage; this.parryMeter = Math.min(100, this.parryMeter + damage * 0.8);
+if (!noStun) { this.setState('hit_stun'); if (pushback > 0 || this.y < GROUND_Y - 30) this.velY = -3.5; } this.velX = pushback * attacker.facingDir; 
+
+if (!isDomainTick) {
+    this.spMeter = Math.min(100, this.spMeter + (damage * 0.3 * spGainModifier)); 
+    if (!this.isUltimateActive()) { this.ultMeter = Math.min(100, this.ultMeter + (damage * 0.1 * spGainModifier)); }
+}
+
+if (attacker && attacker.spMeter !== undefined && !isDomainTick) { 
+    attacker.spMeter = Math.min(100, attacker.spMeter + (damage * 0.2 * spGainModifier)); 
+    attacker.parryMeter = Math.min(100, attacker.parryMeter + (damage * 0.3 * spGainModifier)); 
+    if (!attacker.isUltimateActive()) { 
+        attacker.ultMeter = Math.min(100, attacker.ultMeter + (damage * 0.08 * spGainModifier)); 
+    } 
+    attacker.comboHits++; attacker.comboTimer = 90; attacker.comboJustIncremented = true; 
+    
+    if (attacker.charName === 'Yuji' && attacker.isTransformed) { 
+        if (!domainExpansionSystem.isActive) {
+            attacker.sukunaDomainBar = Math.min(100, attacker.sukunaDomainBar + damage * 0.4 * spGainModifier); 
+        }
+    } 
+}
+
+if (this.health <= 0) { this.health = 0; if (this.currentState !== 'dead') { this.setState('dead'); this.velX = 0; for (let i = 0; i < 60; i++) { let col = Math.random() > 0.5 ? CharacterStatsBase[this.charName].suitColor : CharacterStatsBase[this.charName].hairColor; gameEngine.particles.push(new ParticleEffect(this.x + (Math.random()-0.5)*20, this.y - 15 + (Math.random()-0.5)*30, (Math.random()-0.5)*6, (Math.random()-0.5)*6 - 2, col, 'dust')); } triggerMatchEnd(attacker); } } }
+
+update() {
+if (this.currentState === 'dead') { this.velX = 0; return; }
+if (gameEngine.hitStopFrames > 0 || hollowPurpleSystem.isActive || domainClashSystem.isActive || gameEngine.vsScreenTimer > 0) return;
+if (gameEngine.introTimer > 0 || gameEngine.roundStartTimer > 60) return; 
+
+if (this.isTransformed) { this.transformTimer--; if (this.transformTimer <= 0) { this.isTransformed = false; if(this.charName === 'Yuji') document.getElementById(`hud-name-p${this.playerId+1}`).innerText = this.charName.toUpperCase(); } }
+if (this.invulnTimer > 0) { this.invulnTimer--; this.isInvulnerable = true; } else if (this.currentState !== 'counter_attack') { this.isInvulnerable = false; }
+
+if (domainExpansionSystem.isActive && domainExpansionSystem.casterPlayerId !== this.playerId && domainExpansionSystem.timer < domainExpansionSystem.getShatterTime()) {
+    if (domainExpansionSystem.domainType === 'void') {
+        if (domainExpansionSystem.timer >= 210) { 
+            this.setState('hit_stun'); this.velX = 0; 
+            if (domainExpansionSystem.timer >= 390 && gameEngine.frameCount % 5 === 0) { 
+                let mathSymbols = ["π", "∞", "cos()", "%", "E=MC²"]; 
+                domainExpansionSystem.floatingMathSymbols.push({ text: mathSymbols[Math.floor(Math.random() * mathSymbols.length)], x: this.x + (Math.random() * 40) - 20, y: this.y - 15, life: 0 }); 
+            } 
+            return; 
+        } 
+    } 
+    else if (domainExpansionSystem.domainType === 'shrine' && domainExpansionSystem.timer >= 160) { 
+        if (gameEngine.frameCount % 4 === 0) { if (this.currentState === 'guarding' || this.currentState === 'parry_stance') { this.guardHp -= 1.5; if (this.guardHp <= 0 && !this.isGuardBroken) { this.isGuardBroken = true; this.setState('guard_broken'); this.velX = -5 * this.facingDir; gameEngine.cameraShake += 8; } spawnHitSparks(this.x, this.y, '#ffd000', false); } else { this.receiveDamage(10, 0, gameEngine.roster[domainExpansionSystem.casterPlayerId], true, true, true, 0.2); spawnHitSparks(this.x + (Math.random()-0.5)*30, this.y + (Math.random()-0.5)*30, '', true, true); } } 
+    } 
+}
+
+this.stateFrameTimer++; this.velY += GRAVITY; this.x += this.velX; this.y += this.velY;
+if (this.y >= GROUND_Y - 30) { this.y = GROUND_Y - 30; this.velY = 0; this.velX *= 0.7; }
+this.x = Math.max(15, Math.min(this.x, LOG_W - 15)); if (this.x <= 15) { this.x = 15; if (this.velX < 0) this.velX = 0; } if (this.x >= LOG_W - 15) { this.x = LOG_W - 15; if (this.velX > 0) this.velX = 0; }
+
+if (this.currentState === 'domain_chant') {
+    let threshold = domainExpansionSystem.getShatterTime() - 120;
+    if (!domainExpansionSystem.isActive || domainExpansionSystem.casterPlayerId !== this.playerId || domainExpansionSystem.timer >= threshold) {
+        this.setState('idle');
+    } else {
+        this.velX = 0; return;
+    }
+}
+
+for (let key in this.cooldowns) { if (this.cooldowns[key] > 0) this.cooldowns[key]--; } if (this.comboTimer > 0) { this.comboTimer--; if (this.comboTimer <= 0) this.comboHits = 0; }
+if (this.isGuardBroken) { this.guardHp += 0.5; if (this.guardHp >= 100) { this.guardHp = 100; this.isGuardBroken = false; if (this.currentState === 'guard_broken') this.setState('idle'); } } else if (this.currentState !== 'guarding' && this.guardHp < 100) { this.guardHp += 0.2; }
+
+if (this.currentState === 'hit_stun') { 
+    if(this.charName === 'Yuta' && this.isUltimateActive()){ this.setState('idle'); }
+    else if (this.stateFrameTimer > this.stunTimer) { this.setState('idle'); }
+    return; 
+}
+if (this.currentState === 'dash') { if (this.stateFrameTimer > 15) this.setState('idle'); else this.velX = 14 * this.facingDir; if (gameEngine.frameCount % 3 === 0) { gameEngine.particles.push(new ParticleEffect(this.x, this.y, 0, 0, CharacterStatsBase[this.charName].suitColor, 'dash_trail')); } return; }
+
+if (this.currentState === 'bf_dash_teleport') {
+    let dist = this.bf_targetX - this.x;
+    this.x += dist * 0.35;
+    
+    if (this.stateFrameTimer % 2 === 0) {
+       gameEngine.particles.push(new ParticleEffect(this.x, this.y, 0, 0, '#000', 'dash_trail'));
+       gameEngine.particles.push(new ParticleEffect(this.x + (Math.random()-0.5)*10, this.y + (Math.random()-0.5)*10, 0, 0, '#ff0000', 'dash_trail'));
+    }
+    
+    let opponent = gameEngine.roster[this.playerId === 0 ? 1 : 0]; 
+    if (opponent.currentState === 'hit_stun') opponent.stateFrameTimer = 0; 
+    
+    if (Math.abs(dist) <= 5 || this.stateFrameTimer > 10) { 
+        this.x = this.bf_targetX; 
+        this.velX = 0; 
+        this.facingDir = (opponent.x - this.x) > 0 ? 1 : -1; 
+        opponent.facingDir = -this.facingDir; 
+        this.setState('bf_slow_punch'); 
+    } 
+    return; 
+}
+
+if (this.currentState === 'bf_slow_punch') { let opponent = gameEngine.roster[this.playerId === 0 ? 1 : 0]; if (opponent.currentState === 'hit_stun') opponent.stateFrameTimer = 0; if (this.stateFrameTimer > 30) { if (bfMinigame.chainCount >= 4) { this.executeBlackFlashHit(true); } else { this.executeBlackFlashHit(false); bfMinigame.resume(this); } } return; }
+
+if (this.currentState === 'ability_u_pull' && this.stateFrameTimer >= 14) { gameEngine.projectiles.push(new CombatProjectile('lapse_blue_pull', this.x + (15*this.facingDir), this.y - 15, this.facingDir, this, false)); this.cooldowns['j'] = 0; this.cooldowns['k'] = 0; this.cooldowns['l'] = 0; this.setState('idle'); return; }
+if (this.currentState === 'ability_i_tap' && this.stateFrameTimer >= 6) { gameEngine.cameraShake = 12; gameEngine.screenFlash = { color: '#ff0000', duration: 8, life: 8 }; gameEngine.projectiles.push(new CombatProjectile('red_explosion', this.x, this.y, this.facingDir, this, false)); let opponent = gameEngine.roster[this.playerId === 0 ? 1 : 0]; if (Math.abs(this.x - opponent.x) < 70 && Math.abs(this.y - opponent.y) < 70) { opponent.receiveDamage(35, 12, this, false); gameEngine.hitStopFrames = 5; } this.setState('idle'); return; }
+if (this.currentState === 'ability_o_rct_heal') { if(this.stateFrameTimer % 3 === 0) { gameEngine.particles.push(new ParticleEffect(this.x + (Math.random()-0.5)*30, this.y + 20, 0, -0.5, '', 'rct_heal')); } }
+if(this.currentState === 'yuta_rearm' && this.stateFrameTimer === 30) {
+    const techniques = ['HOLLOW_PURPLE', 'LAPSE_BLUE', 'REVERSAL_RED', 'DISMANTLE'];
+    const chosen = techniques[Math.floor(Math.random() * techniques.length)];
+    this.copiedTechniqueName = chosen;
+    this.copiedTechnique = chosen;
+    this.copyCharges = 1;
+    this.setState('idle');
+}
+
+
+if (this.currentState === 'charging_pose') {
+    this.chargeTimer++; let handX = this.x + 10 + (12 * this.facingDir); let handY = this.y + 18;
+    if (this.chargingKey === 'u' && gameEngine.frameCount % 2 === 0) { gameEngine.particles.push(new ParticleEffect(handX, handY, (Math.random()-0.5)*6, (Math.random()-0.5)*6, '#0044ff', 'outward')); }
+    else if (this.chargingKey === 'i' && gameEngine.frameCount % 2 === 0) { let angle = Math.random() * Math.PI * 2; let dist = 30; let px = handX + Math.cos(angle)*dist; let py = handY + Math.sin(angle)*dist; gameEngine.particles.push(new ParticleEffect(px, py, -Math.cos(angle)*3, -Math.sin(angle)*3, '#ff0000', 'inward')); }
+    
+    let maxChargeTime = 40;
+    if (this.chargeTimer >= maxChargeTime) { this.fireChargedAbility(true); } 
+    else if (!inputs.keys[this.mappedChargeKey]) { this.fireChargedAbility(false); }
+    return;
+}
+
+if (this.currentState === 'ability_hp_fire') {
+    if (this.stateFrameTimer > 40) this.setState('idle');
+}
+
+const attackStates =['atk_j', 'atk_k', 'grab_l', 'ability_u_pull', 'ability_i_tap', 'ability_u', 'ability_u_max', 'ability_u_flurry', 'ability_u_sukuna', 'ability_u_rika', 'ability_u_yuta_domain', 'ability_i', 'ability_i_max', 'ability_i_sukuna', 'ability_i_yuta_iai', 'ability_i_yuta_domain', 'ability_o', 'ability_o_sukuna', 'ability_o_rct_heal', 'ability_o_yuta_domain', 'ability_ult', 'hollow_purple_charge', 'ability_hp_fire', 'counter_attack', 'parry_stance', 'dash', 'dead', 'bf_dash_teleport', 'bf_slow_punch', 'yuta_rearm'];
+if (this.currentState === 'atk_j') { if (this.stateFrameTimer > 10 && this.stateFrameTimer < 40) this.canContinueCombo = (this.comboCounter < 4); else this.canContinueCombo = false; if (this.stateFrameTimer > 40) { this.setState('idle'); this.cooldowns['j'] = 15; }
+} else if (this.currentState === 'grab_l') { if (this.stateFrameTimer > 30) this.setState('idle');
+} else if (!['idle', 'run', 'guarding', 'charging_pose', 'hollow_purple_charge', 'guard_broken'].includes(this.currentState)) {
+let animLimit = (this.currentState === 'ability_ult') ? 540 : (this.currentState === 'ability_u_max' ? 40 : (this.currentState === 'ability_i_max' ? 40 : (this.currentState === 'ability_u_flurry' ? 55 : (this.currentState === 'ability_u' ? 45 : (this.currentState === 'ability_u_rika' ? 45 : (this.currentState === 'ability_o_sukuna' ? 40 : (this.currentState === 'ability_u_sukuna' ? 35 : (this.currentState === 'ability_i_sukuna' ? 35 : (this.currentState === 'ability_o' ? 40 : (this.currentState === 'counter_attack' ? 25 : (this.currentState === 'parry_stance' ? 12 : (this.currentState === 'ability_i_yuta_iai' ? 30 : (this.currentState === 'ability_o_rct_heal' ? 60 : (this.currentState === 'ability_o_yuta_domain' ? 120 : (this.currentState === 'ability_i_yuta_domain' ? 30 : (this.currentState === 'ability_u_yuta_domain' ? 40 : (this.currentState === 'yuta_rearm' ? 40 : 24)))))))))))))))));
+if (this.stateFrameTimer > animLimit) { this.setState('idle'); } }
+
+if (this.divergentFistTimer > 0) { this.divergentFistTimer--; if (this.divergentFistTimer === 0) { let attacker = gameEngine.roster[this.playerId === 0 ? 1 : 0]; this.receiveDamage(40, 4, attacker, true); spawnHitSparks(this.x, this.y, '#0044ff', true); gameEngine.cameraShake += 6; gameEngine.hitStopFrames = 5; } }
+if (this.health > 0 && this.ultMeter < 100 && !this.isUltimateActive()) { this.ultMeter += 0.05; }
+this.processHitDetection(); this.handleInputAndAI(); this.x = Math.max(15, Math.min(this.x, LOG_W - 15));
+}
+
+fireChargedAbility(isMax) {
+if (!this.chargingKey) return;
+if (this.chargingKey === 'u') { 
+    let cost = isMax ? 50 : 20; this.spMeter -= cost; this.cooldowns['u'] = 30; soundManager.play('gojoBlue'); 
+    if (isMax) { this.setState('ability_u_max'); } else { this.setState('ability_u_pull'); } 
+} else if (this.chargingKey === 'i') { 
+    let cost = isMax ? 50 : 30; this.spMeter -= cost; soundManager.play('gojoRed'); 
+    if (isMax) { this.setState('ability_i_max'); this.cooldowns['i'] = 50; } else { this.setState('ability_i_tap'); this.cooldowns['i'] = 50; } 
+} this.chargingKey = null; this.mappedChargeKey = null; this.chargeTimer = 0;
+}
+
+handleInputAndAI() {
+const ctrl = this.playerId === 0 ? { w: keybinds.p1.up, a: keybinds.p1.left, s: keybinds.p1.down, d: keybinds.p1.right, j: keybinds.p1.light, k: keybinds.p1.heavy, l: keybinds.p1.grab, u: keybinds.p1.ab1, i: keybinds.p1.ab2, o: keybinds.p1.ab3, p: keybinds.p1.ult } : { w: keybinds.p2.up, a: keybinds.p2.left, s: keybinds.p2.down, d: keybinds.p2.right, j: keybinds.p2.light, k: keybinds.p2.heavy, l: keybinds.p2.grab, u: keybinds.p2.ab1, i: keybinds.p2.ab2, o: keybinds.p2.ab3, p: keybinds.p2.ult };
+if (bfMinigame.isActive && bfMinigame.player === this) { return; }
+
+if (this.isCpu) {
+if (gameMode === 'training') { this.setState('idle'); if (this.health < this.maxHealth && this.currentState !== 'hit_stun' && !domainExpansionSystem.isActive) this.health += 2; this.guardHp = 100; return; }
+this.aiTick = (this.aiTick || 0) + 1; if (this.aiTick % 4 !== 0) return;
+const attackStates =['atk_j', 'atk_k', 'grab_l', 'ability_u_pull', 'ability_i_tap', 'ability_u', 'ability_u_max', 'ability_u_flurry', 'ability_u_sukuna', 'ability_u_rika', 'ability_u_yuta_domain', 'ability_i', 'ability_i_max', 'ability_i_sukuna', 'ability_i_yuta_iai', 'ability_i_yuta_domain', 'ability_o', 'ability_o_sukuna', 'ability_o_rct_heal', 'ability_o_yuta_domain', 'ability_ult', 'hollow_purple_charge', 'ability_hp_fire', 'counter_attack', 'charging_pose', 'guard_broken', 'hit_stun', 'parry_stance', 'dash', 'dead', 'bf_dash_teleport', 'bf_slow_punch', 'domain_chant'];
+let isCombable = (this.currentState === 'atk_j' && this.canContinueCombo) || (this.currentState === 'ability_u_pull'); if (attackStates.includes(this.currentState) && !isCombable) return;
+let opponent = gameEngine.roster[0]; let distanceX = opponent.x - this.x; this.facingDir = distanceX > 0 ? 1 : -1; let absDist = Math.abs(distanceX);
+let incomingProjectile = gameEngine.projectiles.find(p => p.owner !== this && p.active && p.y > GROUND_Y-60 && Math.abs(p.x - this.x) < 100 && (p.x-this.x) * p.direction * this.facingDir < 0);
+if(incomingProjectile && this.y >= GROUND_Y - 30 && Math.random() < 0.35) { this.velY = -10.5; return; }
+let ultChance = (this.health < this.maxHealth * 0.4) ? 0.02 : 0.005; if (opponent.currentState === 'hit_stun' || opponent.currentState.startsWith('ability')) ultChance += 0.08; 
+if (this.ultMeter >= 100 && (!this.isTransformed && this.charName !== 'Gojo') && Math.random() < ultChance) { triggerUltimate(this); return; }
+if (this.ultMeter >= 100 && (this.charName === 'Gojo' || this.charName === 'Yuta') && Math.random() < ultChance) { this.ultMeter = 0; triggerDomainExpansion(this); return; }
+if (this.isTransformed && this.sukunaDomainBar >= 100 && Math.random() < ultChance) { this.sukunaDomainBar = 0; triggerDomainExpansion(this); return; }
+let opponentIsAttacking = opponent.currentState.startsWith('atk');
+if (opponentIsAttacking && absDist < 60) { if (Math.random() < 0.2 && (this.cooldowns['parry']||0)<=0 && this.parryMeter >= 50) { this.setState('parry_stance'); this.parryMeter -= 50; this.cooldowns['parry'] = 90; return; } }
+if ((incomingProjectile || (opponentIsAttacking && absDist < 60)) && this.guardHp > 20 && Math.random() < 0.8) { this.setState('guarding'); this.guardHp -= 0.15; this.velX = 0; return; }
+
+let possibleActions =[]; let choice = null;
+if (isCombable && absDist <= 45) { choice = (Math.random() < 0.85) ? 'atk_j' : 'idle'; } else {
+    if (absDist <= 35) { if ((this.cooldowns['j'] || 0) <= 0) { possibleActions.push('atk_j', 'atk_j', 'atk_j', 'atk_j'); } if ((this.cooldowns['k'] || 0) <= 0) possibleActions.push('atk_k'); if ((this.cooldowns['l'] || 0) <= 0 && opponent.currentState === 'guarding') possibleActions.push('grab_l', 'grab_l'); } 
+    else if (absDist <= 120) { possibleActions.push('run', 'run'); if ((this.cooldowns['k'] || 0) <= 0) possibleActions.push('atk_k'); if (!this.isTransformed && this.charName === 'Yuji' && this.spMeter >= 20 && (this.cooldowns['u'] || 0) <= 0 && Math.random() < 0.2) possibleActions.push('ability_u'); if (!this.isTransformed && this.charName === 'Yuji' && this.spMeter >= 40 && (this.cooldowns['i'] || 0) <= 0 && Math.random() < 0.2) possibleActions.push('ability_i'); if (this.isTransformed && this.spMeter >= 40 && (this.cooldowns['i'] || 0) <= 0 && Math.random() < 0.2) possibleActions.push('ability_i_sukuna'); if (this.charName === 'Yuta' && this.spMeter >= 40 && (this.cooldowns['i']||0)<=0 && Math.random() < 0.25) possibleActions.push('ability_i_yuta_iai'); } 
+    else { possibleActions.push('run', 'run', 'run'); if (Math.random() < 0.05 && !this.isGuardBroken && (this.cooldowns['dash']||0)<=0) { this.setState('dash'); this.velX = 12 * this.facingDir; this.cooldowns['dash'] = 45; return; }
+        if (this.charName === 'Gojo') { if (this.spMeter >= 30 && (this.cooldowns['i'] || 0) <= 0 && Math.random() < 0.1) possibleActions.push('ability_i'); if (this.spMeter >= 20 && (this.cooldowns['u'] || 0) <= 0 && Math.random() < 0.1) possibleActions.push('ability_u_pull'); }
+        if (!this.isTransformed && this.charName === 'Yuji' && this.spMeter >= 40 && (this.cooldowns['i'] || 0) <= 0 && Math.random() < 0.1 && absDist < 150) possibleActions.push('ability_i');
+        if (this.isTransformed) { if (this.spMeter >= 30 && (this.cooldowns['u'] || 0) <= 0 && Math.random() < 0.1) possibleActions.push('ability_u_sukuna'); if (this.spMeter >= 40 && (this.cooldowns['i'] || 0) <= 0 && Math.random() < 0.1 && absDist < 120) possibleActions.push('ability_i_sukuna'); }
+        if (this.charName === 'Yuta' && !this.isUltimateActive()) {
+            if (this.copyCharges > 0 && this.spMeter >= 20 && (this.cooldowns['u'] || 0) <= 0 && Math.random() < 0.2) possibleActions.push('ability_u');
+            else if (this.copyCharges <= 0 && this.spMeter >= 30 && (this.cooldowns['u'] || 0) <= 0 && Math.random() < 0.2 && absDist < 100) possibleActions.push('ability_u_rika');
+        }
+    }
+    if ((incomingProjectile || (opponentIsAttacking && absDist < 50))) { if (this.charName === 'Gojo' && this.spMeter >= 40 && (this.cooldowns['o'] || 0) <= 0) possibleActions.push('ability_o'); if (!this.isTransformed && this.charName === 'Yuji' && this.spMeter >= 30 && (this.cooldowns['o'] || 0) <= 0) possibleActions.push('ability_o'); if (this.isTransformed && this.spMeter >= 50 && (this.cooldowns['o'] || 0) <= 0) possibleActions.push('ability_o_sukuna'); }
+    if (this.charName === 'Yuta' && this.health < this.maxHealth * 0.5 && this.spMeter >= 100 && (this.cooldowns['o']||0)<=0) possibleActions.push('ability_o_rct_heal');
+    if (possibleActions.length === 0) { this.setState('idle'); return; } choice = possibleActions[Math.floor(Math.random() * possibleActions.length)];
+}
+
+switch(choice) {
+case 'atk_j': if (this.currentState === 'atk_j' && this.canContinueCombo) { this.comboCounter++; } else { this.comboCounter = 1; } this.currentState = 'atk_j'; this.stateFrameTimer = 0; this.blackFlashSuccess = false; this.canContinueCombo = false; if (this.comboCounter >= 4) this.cooldowns['j'] = 45; break;
+case 'atk_k': this.setState('atk_k'); this.cooldowns['k'] = 30; break;
+case 'grab_l': this.setState('grab_l'); this.cooldowns['l'] = 40; break;
+case 'ability_u': 
+    if (this.charName === 'Gojo') { if (this.spMeter >= 50 && Math.random() < 0.5) { this.spMeter -= 50; this.setState('ability_u_max'); this.cooldowns['u'] = 50; soundManager.play('gojoBlue'); } else { this.spMeter -= 20; this.setState('ability_u_pull'); this.cooldowns['u'] = 50; soundManager.play('gojoBlue'); } } 
+    else if (this.charName === 'Yuta') { 
+        this.spMeter -= 20;
+        if(this.isUltimateActive()) { this.setState('ability_u_yuta_domain'); }
+        else if (this.copiedTechnique === 'Gojo_U') { this.setState('ability_u_pull'); soundManager.play('gojoBlue'); }
+        else if (this.copiedTechnique === 'Sukuna_U') { this.setState('ability_u_sukuna'); soundManager.play('sukunaSlash'); }
+        this.copyCharges--; if(this.copyCharges<=0) { this.copiedTechnique = 'NONE'; this.copiedTechniqueName = 'NONE'; } this.cooldowns['u'] = 50;
+    }
+    else { this.spMeter -= 20; this.setState('ability_u'); this.cooldowns['u'] = 80; this.velX = 0; } break;
+case 'ability_u_rika': this.spMeter -= 30; this.setState('ability_u_rika'); this.cooldowns['u'] = 60; break;
+case 'ability_u_pull': if(this.charName === 'Gojo') { this.spMeter -= 20; this.setState('ability_u_pull'); this.cooldowns['u'] = 50; soundManager.play('gojoBlue'); } break;
+case 'ability_i': if (this.charName === 'Gojo') { if (this.spMeter >= 50 && Math.random() < 0.5) { this.spMeter -= 50; this.setState('ability_i_max'); this.cooldowns['i'] = 60; soundManager.play('gojoRed'); } else { this.spMeter -= 30; this.setState('ability_i_tap'); this.cooldowns['i'] = 60; soundManager.play('gojoRed'); } } else { this.spMeter -= 40; this.setState('ability_i'); this.cooldowns['i'] = 80; this.blackFlashSuccess = Math.random() < 0.3; } break;
+case 'ability_i_yuta_iai': if(!this.isUltimateActive()) { this.spMeter -= 35; this.setState('ability_i_yuta_iai'); this.cooldowns['i'] = 45;} break;
+case 'ability_o': if (this.charName === 'Gojo') { this.spMeter -= 40; this.setState('ability_o'); this.invulnTimer = 300; this.cooldowns['o'] = 450; gameEngine.projectiles.push(new CombatProjectile('infinity_shield', this.x, this.y, 1, this, false)); } else { this.spMeter -= 30; this.setState('ability_o'); this.cooldowns['o'] = 60; } break;
+case 'ability_o_rct_heal': if(this.charName === 'Yuta' && !this.isUltimateActive()){ this.spMeter = 0; this.setState('ability_o_rct_heal'); this.cooldowns['o'] = 120; this.health = Math.min(this.maxHealth, this.health + 250); } break;
+case 'ability_i_sukuna': this.spMeter -= 40; this.setState('ability_i_sukuna'); this.cooldowns['i'] = 80; soundManager.play('sukunaSlash'); break;
+case 'ability_u_sukuna': this.spMeter -= 30; this.setState('ability_u_sukuna'); this.cooldowns['u'] = 80; break;
+case 'ability_o_sukuna': this.spMeter -= 50; this.setState('ability_o_sukuna'); this.cooldowns['o'] = 120; break;
+case 'run': this.setState('run'); this.velX = 2.0 * this.facingDir; break; default: this.setState('idle'); break;
+} return;
+}
+
+let keyA = ctrl.a; let keyD = ctrl.d; let justPressedA = inputs.keys[keyA] && inputs.holdDuration[keyA] === 1; let justPressedD = inputs.keys[keyD] && inputs.holdDuration[keyD] === 1;
+
+if (['idle', 'run', 'guarding'].includes(this.currentState) && !this.isGuardBroken) {
+if (justPressedA) { if (this.lastTap.key === keyA && gameEngine.frameCount - this.lastTap.time < 15 && (this.cooldowns['dash']||0)<=0) { this.setState('dash'); this.facingDir = -1; this.velX = -12; this.cooldowns['dash'] = 45; } this.lastTap = { key: keyA, time: gameEngine.frameCount }; }
+if (justPressedD) { if (this.lastTap.key === keyD && gameEngine.frameCount - this.lastTap.time < 15 && (this.cooldowns['dash']||0)<=0) { this.setState('dash'); this.facingDir = 1; this.velX = 12; this.cooldowns['dash'] = 45; } this.lastTap = { key: keyD, time: gameEngine.frameCount }; }
+}
+
+if (!this.isGuardBroken && inputs.keys[ctrl.s] && inputs.keys[ctrl.j] && (this.cooldowns['parry'] || 0) <= 0 && this.parryMeter >= 50 && ['idle','run','guarding'].includes(this.currentState)) {
+this.setState('parry_stance'); this.parryMeter -= 50; this.cooldowns['parry'] = 45; return;
+}
+
+if (this.currentState === 'ability_i' && this.charName === 'Yuji') { if (inputs.keys[ctrl.i] && inputs.holdDuration[ctrl.i] === 1 && this.stateFrameTimer >= 5 && this.stateFrameTimer <= 12) { this.blackFlashSuccess = true; gameEngine.particles.push(new ParticleEffect(this.x + 10*this.facingDir, this.y, 0, 0, '#000')); } }
+
+const canMelee =['idle', 'run', 'ability_u_pull'].includes(this.currentState) || this.canContinueCombo;
+
+if (canMelee) {
+if (inputs.keys[ctrl.j] && inputs.holdDuration[ctrl.j] === 1 && ((this.cooldowns['j'] || 0) <= 0 || this.canContinueCombo)) { 
+    if (this.currentState === 'atk_j' && this.canContinueCombo) { this.comboCounter++; } else { this.comboCounter = 1; } this.currentState = 'atk_j'; this.stateFrameTimer = 0; this.blackFlashSuccess = false; this.canContinueCombo = false; if (this.comboCounter >= 4) this.cooldowns['j'] = 45; return; 
+}
+if (inputs.keys[ctrl.k] && inputs.holdDuration[ctrl.k] === 1 && (this.cooldowns['k'] || 0) <= 0) { this.setState('atk_k'); this.cooldowns['k'] = 15; return; }
+if (inputs.keys[ctrl.l] && inputs.holdDuration[ctrl.l] === 1 && (this.cooldowns['l'] || 0) <= 0) { this.setState('grab_l'); this.cooldowns['l'] = 40; return; }
+
+if (this.isTransformed && this.charName === 'Yuji') {
+if (inputs.keys[ctrl.u] && this.spMeter >= 30 && (this.cooldowns['u'] || 0) <= 0) { this.spMeter -= 30; this.setState('ability_u_sukuna'); this.cooldowns['u'] = 40; return; }
+if (inputs.keys[ctrl.i] && this.spMeter >= 40 && (this.cooldowns['i'] || 0) <= 0) { this.spMeter -= 40; this.setState('ability_i_sukuna'); this.cooldowns['i'] = 60; soundManager.play('sukunaSlash'); return; }
+if (inputs.keys[ctrl.o] && this.spMeter >= 50 && (this.cooldowns['o'] || 0) <= 0) { this.spMeter -= 50; this.setState('ability_o_sukuna'); this.cooldowns['o'] = 120; return; }
+if (inputs.keys[ctrl.p] && inputs.holdDuration[ctrl.p] === 1) {
+    if (this.sukunaDomainBar >= 100) { this.sukunaDomainBar = 0; triggerDomainExpansion(this); return; }
+} 
+} else if (this.charName === 'Gojo') {
+const activeBlue = gameEngine.projectiles.find(p => (p.type === 'blue_orb' || p.type === 'blue_orb_max') && p.owner === this && p.active);
+if (inputs.keys[ctrl.u] && !activeBlue && (this.cooldowns['u'] || 0) <= 0) { 
+    if (this.spMeter >= 50 && this.currentState !== 'charging_pose') { this.chargingKey = 'u'; this.mappedChargeKey = ctrl.u; this.chargeTimer = 0; this.setState('charging_pose'); this.velX = 0; return; } 
+}
+if (inputs.keys[ctrl.i] && (this.cooldowns['i'] || 0) <= 0) { 
+    if (this.spMeter >= 50 && this.currentState !== 'charging_pose') { this.chargingKey = 'i'; this.mappedChargeKey = ctrl.i; this.chargeTimer = 0; this.setState('charging_pose'); this.velX = 0; return; } 
+}
+if (inputs.keys[ctrl.o] && (this.cooldowns['o'] || 0) <= 0) { if (this.spMeter >= 100) { startHollowPurpleSequence(this); } else if (this.spMeter >= 40) { this.spMeter -= 40; this.setState('ability_o'); this.invulnTimer = 300; this.cooldowns['o'] = 450; gameEngine.projectiles.push(new CombatProjectile('infinity_shield', this.x, this.y, 1, this, false)); } return; }
+} else if (this.charName === 'Yuji') {
+if (inputs.keys[ctrl.u] && this.spMeter >= 20 && (this.cooldowns['u'] || 0) <= 0) { this.spMeter -= 20; this.setState('ability_u'); this.cooldowns['u'] = 80; this.velX = 0; return; }
+if (inputs.keys[ctrl.i] && this.spMeter >= 40 && (this.cooldowns['i'] || 0) <= 0) { this.spMeter -= 40; this.setState('ability_i'); this.cooldowns['i'] = 60; return; }
+if (inputs.keys[ctrl.o] && this.spMeter >= 30 && (this.cooldowns['o'] || 0) <= 0) { this.spMeter -= 30; this.setState('ability_o'); this.cooldowns['o'] = 60; return; }
+} else if (this.charName === 'Yuta') {
+    if (this.isUltimateActive()) {
+        if (inputs.keys[ctrl.u] && this.copyCharges > 0 && this.spMeter >= 40 && (this.cooldowns['u'] || 0) <= 0) {
+            this.spMeter -= 40; this.setState('ability_u_yuta_domain'); this.cooldowns['u'] = 80; return;
+        }
+        if (inputs.keys[ctrl.i] && this.spMeter >= 30 && (this.cooldowns['i'] || 0) <= 0) {
+            this.spMeter -= 30; this.setState('ability_i_yuta_domain'); this.cooldowns['i'] = 60; return;
+        }
+        if (inputs.keys[ctrl.o] && this.spMeter >= 60 && (this.cooldowns['o'] || 0) <= 0) {
+            this.spMeter -= 60; this.setState('ability_o_yuta_domain'); this.cooldowns['o'] = 150; return;
+        }
+        if(inputs.keys[ctrl.p] && inputs.holdDuration[ctrl.p] === 1 && (this.cooldowns['rearm'] || 0) <= 0) {
+            this.setState('yuta_rearm'); this.cooldowns['rearm'] = 120; return;
+        }
+    } else {
+        if (inputs.keys[ctrl.u] && (this.cooldowns['u'] || 0) <= 0) {
+            if (this.copyCharges > 0 && this.spMeter >= 20) {
+                this.spMeter -= 20;
+                if (this.copiedTechnique === 'Gojo_U') { this.setState('ability_u_pull'); soundManager.play('gojoBlue'); } 
+                else if (this.copiedTechnique === 'Sukuna_U') { this.setState('ability_u_sukuna'); soundManager.play('sukunaSlash'); }
+                this.cooldowns['u'] = 50; this.copyCharges--; 
+                if (this.copyCharges <= 0) { this.copiedTechnique = 'NONE'; this.copiedTechniqueName = 'NONE';}
+                return;
+            } else if (this.copyCharges <= 0 && this.spMeter >= 30) {
+                this.spMeter -= 30; this.setState('ability_u_rika'); this.cooldowns['u'] = 60;
+                return;
+            }
+        }
+        if (inputs.keys[ctrl.i] && this.spMeter >= 35 && (this.cooldowns['i'] || 0) <= 0) {
+            this.spMeter -= 35; this.setState('ability_i_yuta_iai'); this.cooldowns['i'] = 45; return;
+        }
+        if (inputs.keys[ctrl.o] && this.spMeter >= 100 && (this.cooldowns['o'] || 0) <= 0) {
+            this.spMeter = 0; this.setState('ability_o_rct_heal'); this.cooldowns['o'] = 120;
+            this.health = Math.min(this.maxHealth, this.health + 250); return;
+        }
+    }
+}
+}
+
+const attackStates =['atk_j', 'atk_k', 'grab_l', 'ability_u_pull', 'ability_i_tap', 'ability_u', 'ability_u_max', 'ability_u_flurry', 'ability_u_sukuna', 'ability_u_rika', 'ability_u_yuta_domain', 'ability_i', 'ability_i_max', 'ability_i_sukuna', 'ability_i_yuta_iai', 'ability_i_yuta_domain', 'ability_o', 'ability_o_sukuna', 'ability_o_rct_heal', 'ability_o_yuta_domain', 'ability_ult', 'hollow_purple_charge', 'ability_hp_fire', 'counter_attack', 'parry_stance', 'dash', 'dead', 'bf_dash_teleport', 'bf_slow_punch', 'yuta_rearm'];
+if (attackStates.includes(this.currentState)) return;
+
+let isMoving = false, isGuarding = false;
+if (!this.isGuardBroken && inputs.keys[ctrl.s]) { isGuarding = true; this.guardHp -= 0.15; this.velX = 0; }
+else {
+if (inputs.keys[ctrl.w] && this.velY === 0 && this.y >= GROUND_Y - 30) this.velY = -10.5; let speed = CharacterStatsBase[this.charName].speed;
+if (inputs.keys[ctrl.a]) { this.velX = -speed; this.facingDir = -1; isMoving = true; } if (inputs.keys[ctrl.d]) { this.velX = speed; this.facingDir = 1; isMoving = true; }
+}
+
+this.setState(isMoving ? 'run' : (isGuarding ? 'guarding' : 'idle'));
+
+if (inputs.keys[ctrl.p] && inputs.holdDuration[ctrl.p] === 1 && this.ultMeter >= 100) { 
+    if (this.charName === 'Gojo' || this.charName === 'Yuta') {
+        this.ultMeter = 0; triggerUltimate(this); 
+    } else if (this.charName === 'Yuji' && !this.isTransformed) {
+        this.setState('idle'); triggerUltimate(this);
+    } 
+}
+}
+
+processHitDetection() {
+if (!['atk_j', 'atk_k', 'grab_l', 'ability_u', 'ability_u_flurry', 'ability_u_max', 'ability_u_sukuna', 'ability_u_rika', 'ability_u_yuta_domain', 'ability_i', 'ability_i_max', 'ability_i_sukuna', 'ability_o', 'ability_o_sukuna', 'ability_i_yuta_iai', 'ability_i_yuta_domain', 'ability_o_yuta_domain'].includes(this.currentState)) return; let attackConfig = null;
+let opponent = gameEngine.roster[this.playerId === 0 ? 1 : 0];
+
+if(this.isTransformed && (this.currentState === 'atk_j' || this.currentState === 'atk_k')){ if (this.stateFrameTimer === 5) { attackConfig = { range: 65, damage: this.currentState === 'atk_k' ? 30 : 15, pushback: 5, isSukunaSlash: true, stunDuration: 40 }; } }
+
+if (!this.isTransformed && this.currentState === 'atk_j' && this.stateFrameTimer === 5) { this.performLightComboHit(); }
+if (!this.isTransformed && this.currentState === 'atk_k') { 
+    if (this.charName === 'Yuta' && this.stateFrameTimer === 6) this.performComboHit();
+    else if (this.charName !== 'Yuta' && this.stateFrameTimer === 5) this.performComboHit();
+}
+if (this.currentState === 'grab_l' && this.stateFrameTimer === 6) { attackConfig = { range: 25, damage: 20, pushback: 20, hitStop: 8, isUnblockable: true, isGrab: true }; }
+
+if (this.currentState === 'ability_u_max' && this.charName === 'Gojo') {
+    if (this.stateFrameTimer === 15) { gameEngine.projectiles.push(new CombatProjectile('blue_orb_max', this.x, this.y, this.facingDir, this, true)); gameEngine.cameraShake += 5; }
+}
+if (this.currentState === 'ability_i_max' && this.charName === 'Gojo') {
+    if (this.stateFrameTimer === 2) { 
+        gameEngine.projectiles.push(new CombatProjectile('max_red_orb', this.x + (30*this.facingDir), this.y, this.facingDir, this, true)); 
+        gameEngine.cameraShake += 10; 
+    }
+}
+
+if (this.currentState === 'ability_u_yuta_domain') {
+    if(this.stateFrameTimer === 10){
+        switch(this.copiedTechnique){
+            case 'HOLLOW_PURPLE': startHollowPurpleSequence(this); break;
+            case 'LAPSE_BLUE': this.setState('ability_u_pull'); break;
+            case 'REVERSAL_RED': this.setState('ability_i_max'); break;
+            case 'DISMANTLE': this.setState('ability_u_sukuna'); break;
+        }
+        this.copyCharges = 0;
+        this.copiedTechnique = "NONE";
+        this.copiedTechniqueName = "NONE";
+    }
+}
+
+if (this.currentState === 'ability_u_sukuna') { if (this.stateFrameTimer % 5 === 0 && this.stateFrameTimer <= 25) { gameEngine.projectiles.push(new CombatProjectile('sukuna_dismantle', this.x + 20*this.facingDir, this.y - 10 + (Math.random()*20), this.facingDir, this)); soundManager.play('sukunaSlash'); } }
+if (this.currentState === 'ability_i_sukuna') { if (this.stateFrameTimer >= 5 && this.stateFrameTimer <= 30) { attackConfig = { range: 60, damage: 2, pushback: 0.1, hitStop: 1, isSukunaSlash: true, isMultiSlash: true, stunDuration: 40, spGainMod: 0.1 }; } if (this.stateFrameTimer === 31) { attackConfig = { range: 65, damage: 15, pushback: 10, hitStop: 6, isSukunaSlash: true, isBigSlash: true, stunDuration: 40, spGainMod: 0.5 }; } }
+if (this.currentState === 'ability_o_sukuna') { 
+    if (this.stateFrameTimer === 30) { gameEngine.projectiles.push(new CombatProjectile('sukuna_fire_arrow', this.x + (30 * this.facingDir), this.y, this.facingDir, this)); } 
+}
+
+if (this.currentState === 'ability_u_rika') {
+    if (this.stateFrameTimer === 10) {
+        gameEngine.projectiles.push(new CombatProjectile('rika_punch', this.x, this.y, this.facingDir, this));
+        gameEngine.cameraShake += 5;
+    }
+}
+if (this.currentState === 'ability_i_yuta_iai') {
+    if(this.stateFrameTimer === 4) { this.velX = 15 * this.facingDir; }
+    if (this.stateFrameTimer >= 5 && this.stateFrameTimer <= 9) {
+        attackConfig = { range: 60, damage: 4, pushback: 1, hitStop: 1, isYutaSlash: true, isMultiSlash: true };
+    }
+    if (this.stateFrameTimer === 10) { this.velX = 0; }
+}
+if(this.currentState === 'ability_i_yuta_domain') {
+    if (this.stateFrameTimer === 10) {
+        gameEngine.projectiles.push(new CombatProjectile('jacob_ladder_beam', opponent.x, 0, this.facingDir, this));
+    }
+}
+if(this.currentState === 'ability_o_yuta_domain') {
+    if (this.stateFrameTimer === 10) {
+        gameEngine.projectiles.push(new CombatProjectile('true_love_beam_charge', this.x, this.y, this.facingDir, this));
+    }
+}
+
+
+if (this.currentState === 'ability_u' && this.charName === 'Yuji') {
+    if (this.stateFrameTimer < 25) {
+        if (this.stateFrameTimer % 2 === 0) {
+            gameEngine.particles.push(new ParticleEffect(this.x + 10 * this.facingDir, this.y - 10, (Math.random()-0.5)*2, -Math.random()*4, '#0088ff', 'normal'));
+            gameEngine.particles.push(new ParticleEffect(this.x + 10 * this.facingDir, this.y - 10, (Math.random()-0.5)*2, -Math.random()*4, '#00ccff', 'normal'));
+        }
+    } else if (this.stateFrameTimer === 25) {
+        gameEngine.cameraShake = 20; soundManager.play('hitHeavy');
+        for (let i = 0; i < 5; i++) { gameEngine.projectiles.push(new CombatProjectile('yuji_rock', this.x + 20 * this.facingDir, this.y + 30, this.facingDir, this)); }
+        for (let i = 0; i < 8; i++) { gameEngine.particles.push(new ParticleEffect(this.x + 20*this.facingDir, this.y+35, (Math.random()-0.5)*15, (Math.random()-1)*7, '#777')); }
+        attackConfig = { range: 45, damage: 25, pushback: 15, hitStop: 8, isLauncher: true, stunDuration: 40 };
+    }
+}
+
+if (this.currentState === 'ability_u_flurry' && this.charName === 'Yuji') {
+let opponent = gameEngine.roster[this.playerId === 0 ? 1 : 0]; opponent.x = this.x + (30 * this.facingDir); opponent.setState('hit_stun');
+if (this.stateFrameTimer % 8 === 0 && this.stateFrameTimer < 48) { opponent.receiveDamage(5, 0, this, false); spawnHitSparks(opponent.x, opponent.y, '#fff', false); gameEngine.cameraShake = 3; }
+if (this.stateFrameTimer === 50) { opponent.receiveDamage(20, 15, this, false); spawnHitSparks(opponent.x, opponent.y, '#ff003c', true); gameEngine.cameraShake = 10; gameEngine.hitStopFrames = 8; }
+}
+
+if (this.currentState === 'ability_i' && this.charName === 'Yuji') {
+if (this.stateFrameTimer === 1) this.velX = 0;
+if (this.stateFrameTimer === 8) this.velX = 15 * this.facingDir;
+if (this.stateFrameTimer === 10 && !bfMinigame.isActive) {
+if (this.blackFlashSuccess) { attackConfig = { range: 35, damage: 20, pushback: 0, hitStop: 5, isBlackFlash: true }; }
+else { attackConfig = { range: 30, damage: 15, pushback: 5, hitStop: 4, applyDivergent: true, stunDuration: 40 }; }
+}
+}
+
+if(attackConfig) this.performMeleeHit(attackConfig);
+}
+
+performMeleeHit(config) {
+let opponent = gameEngine.roster[this.playerId === 0 ? 1 : 0];
+if (opponent.currentState === 'parry_stance') { if (this.currentState === 'atk_j' || this.currentState === 'atk_k') { opponent.setState('idle'); opponent.spMeter = Math.min(100, opponent.spMeter + 10); gameEngine.hitStopFrames = 15; gameEngine.cameraShake += 10; spawnHitSparks(opponent.x + 10*opponent.facingDir, opponent.y, '#00ff55', true); soundManager.play('hitHeavy'); this.setState('hit_stun'); this.stateFrameTimer = -40; return false; } }
+
+let hitboxX = (this.facingDir > 0) ? this.x : this.x - config.range;
+if(this.currentState === 'ability_i_yuta_iai') hitboxX = this.x - (config.range/2);
+
+let hitDetected = (opponent.x > hitboxX && opponent.x < hitboxX + config.range);
+
+if (hitDetected && Math.abs(this.y - opponent.y) < 45) {
+if (config.isGrab) { opponent.velY = -6; gameEngine.cameraShake += 5; }
+if (config.isUnblockable && opponent.currentState === 'guarding') { gameEngine.hitStopFrames = 15; gameEngine.cameraShake += 8; opponent.guardHp -= 20; opponent.receiveDamage(25, 6, this, true);
+} else {
+if (config.isBlackFlash && !bfMinigame.isActive) { if(this.charName === 'Yuji'){ bfMinigame.start(this); this.executeBlackFlashHit(false); return true; } }
+
+gameEngine.hitStopFrames = config.hitStop || 3; opponent.stunTimer = config.stunDuration || 40;
+if (config.isBlackFlash) { 
+    gameEngine.screenFlash = { color: '#000', duration: 8, life: 8 }; gameEngine.impactFrame = 2; gameEngine.cameraShake += 15; spawnHitSparks(opponent.x, opponent.y, '', false, false, true); 
+} else if (config.isSukunaSlash) { 
+    if(!config.isMultiSlash) gameEngine.cameraShake += 2; spawnHitSparks(opponent.x, opponent.y, '', config.isBigSlash, true); 
+} else if (config.isYutaSlash) {
+    gameEngine.cameraShake += 3; spawnHitSparks(opponent.x, opponent.y, '#fff', config.isLauncher, false, false, true);
+} else { 
+    gameEngine.cameraShake += 2; spawnHitSparks(opponent.x, opponent.y + 5, '#fff', false); 
+}
+
+opponent.receiveDamage(config.damage, config.pushback, this, false, false, false, config.spGainMod || 1.0); if (config.isLauncher) opponent.velY = -8; if (config.applyDivergent) opponent.divergentFistTimer = 30; } return true; } return false; 
+}
+
+executeBlackFlashHit(isFinal) {
+    let opponent = gameEngine.roster[this.playerId === 0 ? 1 : 0]; let dmg = 25 * (1 + (this.blackFlashBuff || 0) * 0.15); 
+    if (isFinal) { gameEngine.screenFlash = { color: '#000', duration: 15, life: 15 }; gameEngine.impactFrame = 4; gameEngine.cameraShake += 25; gameEngine.hitStopFrames = 45; showCinematicMessage("BLACK FLASH", "#ff0000", 60, 50); spawnHitSparks(opponent.x, opponent.y, '', false, false, true); opponent.receiveDamage(dmg * 2, 25, this, false); opponent.velY = -8; this.setState('idle');
+    } else { gameEngine.screenFlash = { color: '#000', duration: 8, life: 8 }; gameEngine.impactFrame = 2; gameEngine.cameraShake += 10; gameEngine.hitStopFrames = 5; spawnHitSparks(opponent.x, opponent.y, '', false, false, true); opponent.receiveDamage(dmg, 0, this, false); this.setState('ability_i'); this.stateFrameTimer = 11; this.velX = 0; }
+}
+
+performLightComboHit() { 
+    let isFinalHit = this.comboCounter >= 4; 
+    let config = { range: 22, damage: isFinalHit ? 30 : 15, pushback: isFinalHit ? 18 : 0, hitStop: isFinalHit ? 12 : 3, isLauncher: isFinalHit, stunDuration: 40 }; 
+    if (this.charName === 'Yuta') {
+        config.range = 35; config.damage = isFinalHit ? 35 : 18; config.pushback = isFinalHit ? 20 : 0; config.isYutaSlash = true; this.velX = 6 * this.facingDir;
+    } else {
+        this.velX = 4 * this.facingDir;
+    }
+    let hitConnected = this.performMeleeHit(config); 
+    if (hitConnected) this.velX = 0; 
+}
+
+performComboHit() { 
+    let config = { range: 28, damage: 20, pushback: 5, hitStop: 3, stunDuration: 40 }; 
+    if (this.charName === 'Yuta') {
+        config.range = 50; config.damage = 30; config.pushback = 10; config.hitStop = 6; config.isYutaSlash = true; this.velX = 8 * this.facingDir;
+    }
+    
+    if(this.charName === 'Yuji' && Math.random() < 0.10) { 
+        let blackFlashConfig = { range: 35, damage: 90, pushback: 20, hitStop: 20, isBlackFlash: true, stunDuration: 40 }; 
+        this.performMeleeHit(blackFlashConfig); 
+    } else { 
+        let hitC = this.performMeleeHit(config); 
+        if (this.charName === 'Yuta' && hitC) this.velX = 0;
+    } 
+}
+
+draw(ctx) {
+if (this.currentState === 'dead') return;
+
+ctx.save(); ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.beginPath(); ctx.ellipse(this.x + 10, this.y + 30, 16, 4, 0, 0, Math.PI*2); ctx.fill();
+
+let centerX = Math.floor(this.x + 10); let centerY = Math.floor(this.y + 30); 
+
+if (this.charName === 'Gojo' && this.currentState === 'charging_pose') {
+    let cp = Math.min(1, this.chargeTimer / 40); 
+    let barX = centerX - 15;
+    let barY = centerY - 75;
+    ctx.fillStyle = '#222'; ctx.fillRect(barX, barY, 30, 6);
+    ctx.fillStyle = this.chargingKey === 'u' ? '#00c3ff' : '#ff0033';
+    ctx.fillRect(barX, barY, 30 * cp, 6);
+    ctx.strokeStyle = '#fff'; ctx.lineWidth = 1; ctx.strokeRect(barX, barY, 30, 6);
+}
+
+ctx.translate(centerX, centerY); ctx.scale(this.facingDir, 1);
+let fArmX = 4, fArmY = 4, bArmX = -4, bArmY = 4; let fLegX = 4, fLegY = 0, bLegX = -6, bLegY = 0; let torsoLean = 0, headY = -24, bodyBounce = 0; const frame = this.stateFrameTimer;
+
+let swordAngle = -Math.PI / 6;
+
+if (this.charName === 'Yuta' && this.currentState === 'idle') {
+    fArmX = 12; fArmY = 0; bArmX = -6; bArmY = 4; swordAngle = -Math.PI / 4;
+}
+
+if (this.currentState === 'run') { 
+    bodyBounce = (gameEngine.frameCount % 12 < 6 ? -2 : 0); const isForwardSwing = (gameEngine.frameCount % 16 < 8); 
+    fArmX = isForwardSwing ? -6 : 8; bArmX = isForwardSwing ? 6 : -6; fLegX = isForwardSwing ? -6 : 8; bLegX = isForwardSwing ? 8 : -8; headY += bodyBounce; 
+    swordAngle = -Math.PI / 4 + Math.sin(gameEngine.frameCount*0.2)*0.1;
+    if (this.charName === 'Yuta') { fArmX = 14; fArmY = 4; swordAngle = -Math.PI / 5 + Math.sin(gameEngine.frameCount*0.2)*0.1; }
+}
+else if (this.currentState === 'dash' || this.currentState === 'bf_dash_teleport' || this.currentState === 'ability_i_yuta_iai') { torsoLean = 15; headY += 4; fArmX = -10; bArmX = 15; fLegX = 10; bLegX = -10; swordAngle = 0; }
+else if (this.currentState === 'guarding') { fArmX = -5; fArmY = -12; bArmX = -2; bArmY = -10; torsoLean = -1; headY += 2; swordAngle = -Math.PI / 1.5; }
+else if (this.currentState === 'guard_broken' || this.currentState === 'hit_stun') { torsoLean = 4; headY -= 5; fArmX = -12; bArmX = -12; fArmY -= 4; bArmY -= 4; if (this.currentState === 'guard_broken') bLegX = -14; swordAngle = -Math.PI; }
+else if (this.currentState === 'atk_j' && frame > 2 && frame < 15) { 
+    if(this.charName === 'Yuji') { if (this.comboCounter === 1) { fArmX = 20; fArmY = -4; torsoLean = 2; } else if (this.comboCounter === 2) { fArmX = 18; fArmY = -10; torsoLean = -4; } else if (this.comboCounter === 3) { fLegX = 22; fLegY = 0; torsoLean = -5; headY += 4; } else if (this.comboCounter >= 4) { torsoLean = -8; bArmX = 25; bArmY = -10; fArmY = 0; bLegX = -10; fLegX = 10; } 
+    } else if (this.charName === 'Gojo') { if (this.comboCounter === 1) { fArmX = 22; fArmY = -6; torsoLean = 1; } else if (this.comboCounter === 2) { bArmX = 20; bArmY = -4; torsoLean = -1; } else if (this.comboCounter === 3) { fLegX = 18; fLegY = -2; torsoLean = -2; headY += 2; } else if (this.comboCounter >= 4) { torsoLean = -4; fArmX = 25; fArmY = -8; fLegX = 5; } 
+    } else if (this.charName === 'Yuta') { 
+        if (this.comboCounter === 1) { fArmX = 15; fArmY = -5; torsoLean = 4; swordAngle = Math.PI / 4; } 
+        else if (this.comboCounter === 2) { fArmX = 20; fArmY = 10; torsoLean = 6; swordAngle = Math.PI / 1.5; } 
+        else if (this.comboCounter === 3) { fArmX = 5; fArmY = -15; torsoLean = -2; headY -= 2; swordAngle = -Math.PI / 4; } 
+        else if (this.comboCounter >= 4) { torsoLean = -4; bArmX = -8; bArmY = -5; fArmX = 10; fArmY = -25; fLegX = 10; swordAngle = -Math.PI / 1.2; } 
+    } else { if (this.comboCounter === 1) { fArmX = 20; fArmY = -4; torsoLean = 2; } else if (this.comboCounter === 2) { bArmX = 20; bArmY = -4; torsoLean = -2; } else if (this.comboCounter === 3) { fLegX = 22; torsoLean = -5; headY += 4; } else if (this.comboCounter >= 4) { torsoLean = -8; bArmX = 25; bArmY = -2; bLegX = -10; fLegX = 10; } } }
+else if (this.currentState === 'atk_k') { 
+    if (this.charName === 'Yuta') {
+        if (frame < 6) { fArmX = -10; fArmY = -20; torsoLean = -8; swordAngle = -Math.PI / 1.2; }
+        else { fArmX = 25; fArmY = 5; fLegX = 15; torsoLean = 10; headY += 2; swordAngle = Math.PI / 3; }
+    } else {
+        if (this.comboCounter % 2 === 1 && frame > 2 && frame < 8) { fArmX = 20; fArmY = -4; torsoLean = 2; } else if (frame > 2 && frame < 14) { fArmX = -6; fArmY = -8; fLegX = 22; torsoLean = -5; headY += 4; } 
+    }
+}
+else if (this.currentState === 'grab_l') { if (frame < 6) { fArmX = 15; fArmY = -5; torsoLean = 3; } else { fArmX = 4; fArmY = 15; torsoLean = -5; swordAngle = -Math.PI/4; } }
+else if (this.currentState === 'ability_u' && this.charName === 'Yuji') { if (frame < 25) { torsoLean = 5; fArmX = 15; fArmY = 0; bArmX = 10; bArmY = -5; headY += 2; bodyBounce = 2; } else { torsoLean = 15; fArmX = 15; fArmY = 20; bArmX = 10; bArmY = 20; headY += 8; bodyBounce = 4; } }
+else if (this.currentState === 'ability_u' && this.charName === 'Gojo') { fArmX = 18; fArmY = -10; bArmX = -2; bArmY = 0; torsoLean = 8; headY -= 2; bodyBounce = -6; fLegX = 6; bLegX = -2; }
+else if (this.currentState === 'ability_u_max' && this.charName === 'Gojo') { fArmX = 18; fArmY = -25; bArmX = 5; bArmY = -20; torsoLean = -8; headY -= 4; bodyBounce = -4; fLegX = 8; bLegX = -4; }
+else if (this.currentState === 'ability_i_max' && this.charName === 'Gojo') { if(frame<15) { fArmX = 25; fArmY = -5; bArmX = -10; bArmY = 5; torsoLean = 12; bodyBounce = 2; headY += 2; fLegX = 12; bLegX = -10; } }
+else if (this.currentState === 'ability_hp_fire' && this.charName === 'Gojo') { fArmX = 35; fArmY = -5; bArmX = -8; bArmY = -2; torsoLean = 10; headY += 4; bodyBounce = 4; fLegX = 15; bLegX = -10; }
+else if (this.currentState === 'ability_u_flurry' && this.charName === 'Yuji') { torsoLean = 4; if (frame % 6 < 3) { fArmX = 20; fArmY = -4; bArmX = -4; bArmY = 4; } else { fArmX = 4; fArmY = 4; bArmX = 20; bArmY = -4; } }
+else if (this.currentState === 'ability_u_rika') { fArmX = 20; fArmY = -10; bArmX = -5; bArmY = 5; torsoLean = 5; swordAngle = Math.PI/6; }
+else if (this.currentState === 'ability_i' && this.charName === 'Yuji') { if (frame < 8) { fArmX = -4; fArmY = 8; torsoLean = -5; } else { fArmX = 16; fArmY = -4; torsoLean = 5; } }
+else if (this.currentState === 'bf_slow_punch') { let progress = frame/30; fArmX = -4 + progress * 20; fArmY = 8 - progress * 12; torsoLean = -5 + progress * 10; }
+else if (this.currentState === 'ability_o' && this.charName === 'Yuji') { fArmX = -8; fArmY = -12; bArmX = -2; bArmY = -14; torsoLean = 2; headY += 2; }
+else if (this.currentState === 'counter_attack') { fArmX = 25; fArmY = -8; bArmX = -10; bArmY = 10; torsoLean = 8; headY += 2; }
+else if (this.currentState === 'ability_i_sukuna') { if (frame > 2 && frame < 30) { fArmX = 22 + Math.random()*5; fArmY = Math.random()*10 - 5; bArmX = 20; bArmY = 8; torsoLean = 4; } }
+else if (this.currentState === 'ability_u_sukuna') { fArmX = 16; fArmY = -15 + (Math.random()*10); bArmX = 10; bArmY = -5; torsoLean = 2; }
+else if (this.currentState === 'ability_o_sukuna') { 
+    if (frame < 30) {
+        fArmX = 16; fArmY = -12; bArmX = -10; bArmY = -12; torsoLean = 2; 
+        let chargeR = frame / 30;
+        
+        ctx.save(); ctx.translate(fArmX + torsoLean, fArmY + bodyBounce);
+        ctx.beginPath(); ctx.moveTo(0, -40); ctx.quadraticCurveTo(20*chargeR, 0, 0, 40); ctx.strokeStyle = `rgba(255, 68, 0, ${chargeR})`; ctx.lineWidth = 4; ctx.stroke();
+        ctx.translate(-20 * chargeR, 0);
+        
+        ctx.globalCompositeOperation = 'lighter';
+        let fA_glow = ctx.createRadialGradient(20, 0, 0, 10, 0, 30 + 20*chargeR);
+        fA_glow.addColorStop(0, `rgba(255, 255, 200, ${chargeR})`);
+        fA_glow.addColorStop(0.3, `rgba(255, 150, 0, ${chargeR*0.8})`);
+        fA_glow.addColorStop(1, "rgba(0, 0, 0, 0)");
+        ctx.fillStyle = fA_glow; ctx.fillRect(-40, -50, 100, 100);
+        ctx.globalCompositeOperation = 'source-over';
+        let scaleArr = 0.5 + 0.5*chargeR; ctx.scale(scaleArr, scaleArr);
+        
+        ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.moveTo(40, 0); ctx.lineTo(15, -15); ctx.lineTo(20, 0); ctx.lineTo(15, 15); ctx.fill();
+        ctx.fillStyle = '#ff6600'; ctx.beginPath(); ctx.moveTo(25, 0); ctx.lineTo(5, -25); ctx.lineTo(-10, -10); ctx.lineTo(-30, -15); ctx.lineTo(-20, 0); ctx.lineTo(-30, 15); ctx.lineTo(-10, 10); ctx.lineTo(5, 25); ctx.fill();
+        ctx.fillStyle = '#ffcc00'; ctx.beginPath(); ctx.moveTo(30, 0); ctx.lineTo(10, -10); ctx.lineTo(-15, 0); ctx.lineTo(10, 10); ctx.fill();
+        ctx.restore();
+    } else {
+        fArmX = 25; fArmY = -5; torsoLean = 6;
+    }
+}
+else if (this.currentState === 'ability_i_tap' && this.charName === 'Gojo') { fArmX = 8; fArmY = -12; bArmX = -2; bArmY = 2; torsoLean = 6; headY += 4; }
+else if (this.currentState === 'ability_u_pull' && (this.charName === 'Gojo' || this.charName === 'Yuta')) { fArmX = 12; fArmY = -5; bArmX = -2; bArmY = -8; torsoLean = 3; headY+=1; swordAngle = -Math.PI/4; }
+else if (this.currentState === 'ability_i_yuta_iai') { if(frame < 5){ torsoLean = -10; fArmX = -5; fArmY = 5; bArmX = 0; bArmY = 5; swordAngle = -Math.PI/2;} else if(frame > 10){ torsoLean = 10; fArmX = 20; fArmY = 0; swordAngle = Math.PI/2;} }
+else if (this.currentState === 'ability_o_rct_heal') { fArmX = 0; fArmY = -10; bArmX = 0; bArmY = -10; torsoLean = 0; headY -= 2; }
+else if (this.currentState === 'ability_i_yuta_domain') { fArmX = 15; fArmY = -25; torsoLean = -5; headY -= 5; swordAngle = -Math.PI / 1.5; }
+else if (this.currentState === 'ability_o_yuta_domain') { if (frame < 100) { fArmX = 10; fArmY = -15; bArmX = 10; bArmY = -15; torsoLean = 0; } else { fArmX=25; fArmY=-5; torsoLean=5; }}
+else if (this.currentState === 'yuta_rearm') { if (frame < 20) { fArmX = 10; fArmY = 15; torsoLean=5; swordAngle = -Math.PI/2; } else { fArmX = 10; fArmY = 0; torsoLean = 0; swordAngle = -Math.PI/4; }}
+else if (this.currentState === 'parry_stance') { fArmX = 15; fArmY = -12; bArmX = -5; bArmY = 15; torsoLean = -5; headY += 2; }
+else if (this.currentState === 'domain_chant') { fArmX = 4; fArmY = -12; bArmX = 10; bArmY = -12; torsoLean = -2; headY += 2; }
+
+if (this.currentState === 'charging_pose' || this.currentState === 'hollow_purple_charge') { fArmX = 8; fArmY = -12; bArmX = 8; bArmY = -12; torsoLean = -1; bodyBounce = (gameEngine.frameCount % 4 < 2 ? -1 : 0); }
+
+if (gameEngine.introTimer > 0) {
+    if (this.charName === 'Gojo') {
+        torsoLean = -10; fArmX = 15; fArmY = -25; bArmX = -15; bArmY = 25; headY -= 2;
+    } else if (this.charName === 'Yuta') {
+        torsoLean = 5; fArmX = -10; fArmY = -5; bArmX = 15; bArmY = 10; swordAngle = -Math.PI/1.2;
+    }
+}
+
+const stats = CharacterStatsBase[this.charName]; 
+const drawWithOutline = (color, x, y, w, h) => { ctx.fillStyle = '#000'; ctx.fillRect(x - 1, y - 1, w + 2, h + 2); ctx.fillStyle = color; ctx.fillRect(x, y, w, h); };
+
+if (this.charName === 'Yuta') { 
+    drawWithOutline(stats.pantsColor, bLegX - 4, -4 + bodyBounce + bLegY, 7, 16); 
+} else { 
+    drawWithOutline(stats.suitColor, bLegX - 4, -4 + bodyBounce + bLegY, 7, 16); 
+    if (this.charName === 'Yuji') { ctx.fillStyle = '#ff254a'; ctx.fillRect(bLegX - 4, 9 + bodyBounce + bLegY, 7, 5); } 
+    else { ctx.fillStyle = '#000'; ctx.fillRect(bLegX - 4, 9 + bodyBounce + bLegY, 7, 5); } 
+}
+
+ctx.strokeStyle = this.charName === 'Yuta' ? '#ffffff' : stats.suitColor; ctx.lineWidth = 4; ctx.beginPath(); 
+ctx.moveTo(-6, -4 + bodyBounce); ctx.lineTo(bArmX, bArmY + bodyBounce); ctx.stroke(); 
+ctx.fillStyle = '#ffcca6'; ctx.fillRect(bArmX - 2, bArmY + bodyBounce - 2, 4, 4);
+
+if (this.charName === 'Yuta') { 
+    drawWithOutline('#ffffff', -7 + torsoLean, -22 + bodyBounce, 15, 20); 
+} else if (this.charName === 'Yuji') { 
+    drawWithOutline(stats.suitColor, -7 + torsoLean, -22 + bodyBounce, 15, 20); ctx.fillStyle = '#ff254a'; ctx.fillRect(-6 + torsoLean, -22 + bodyBounce, 13, 6); ctx.fillRect(-2 + torsoLean, -20 + bodyBounce, 5, 8); 
+} else { 
+    drawWithOutline(stats.suitColor, -7 + torsoLean, -22 + bodyBounce, 15, 20); drawWithOutline('#14141e', -7 + torsoLean, -25 + bodyBounce, 14, 6); 
+}
+
+if (this.charName === 'Yuta') { 
+    drawWithOutline(stats.pantsColor, fLegX - 3, -2 + bodyBounce + fLegY, 7, 16); 
+} else { 
+    drawWithOutline(stats.suitColor, fLegX - 3, -2 + bodyBounce + fLegY, 7, 16); 
+    if (this.charName === 'Yuji') { ctx.fillStyle = '#ff254a'; ctx.fillRect(fLegX - 3, 11 + bodyBounce + fLegY, 7, 5); } 
+    else { ctx.fillStyle = '#000'; ctx.fillRect(fLegX - 3, 11 + bodyBounce + fLegY, 7, 5); } 
+}
+
+ctx.strokeStyle = this.charName === 'Yuta' ? '#ffffff' : stats.suitColor; ctx.lineWidth = 5; ctx.beginPath(); 
+ctx.moveTo(2 + torsoLean, -4 + bodyBounce); ctx.lineTo(fArmX + torsoLean, fArmY + bodyBounce); ctx.stroke(); 
+
+let fistX = fArmX + torsoLean; let fistY = fArmY + bodyBounce; 
+ctx.fillStyle = '#ffcca6'; ctx.fillRect(fistX - 2, fistY - 2, 5, 5);
+
+if (this.charName === 'Yuta') {
+    ctx.save();
+    ctx.translate(fistX, fistY);
+    ctx.rotate(swordAngle);
+    ctx.fillStyle = '#222'; ctx.fillRect(-2, -5, 4, 12);
+    ctx.fillStyle = '#d4af37'; ctx.fillRect(-5, -6, 10, 3);
+    ctx.fillStyle = '#e0e0e0';
+    ctx.beginPath(); ctx.moveTo(-2, -6); ctx.lineTo(-1, -45); ctx.lineTo(0, -48); ctx.lineTo(1, -45); ctx.lineTo(2, -6); ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.beginPath(); ctx.moveTo(0, -6); ctx.lineTo(0, -38); ctx.lineTo(1, -35); ctx.lineTo(1, -6); ctx.fill();
+    ctx.restore();
+}
+
+if (this.currentState === 'ability_u_pull' && (this.charName === 'Gojo' || this.charName === 'Yuta')) {
+    let chargeP = Math.min(1, frame / 15); ctx.save(); ctx.globalCompositeOperation = 'lighter';
+    let pullGrad = ctx.createRadialGradient(fistX, fistY, 0, fistX, fistY, 30*chargeP); pullGrad.addColorStop(0,"#fff"); pullGrad.addColorStop(0.3, "#00c3ff"); pullGrad.addColorStop(1, "transparent");
+    ctx.fillStyle = pullGrad; ctx.beginPath(); ctx.arc(fistX, fistY, 30*chargeP, 0, Math.PI*2); ctx.fill();
+    for(let w=0; w<5; w++){ let px = fistX + (Math.random()-0.5)*40; let py = fistY + (Math.random()-0.5)*40; ctx.strokeStyle="#e6f7ff"; ctx.lineWidth=2; ctx.beginPath(); ctx.moveTo(px,py); ctx.lineTo(fistX,fistY); ctx.stroke(); } ctx.restore();
+}
+
+if (this.currentState === 'charging_pose' && this.charName === 'Gojo' && this.chargingKey === 'i') {
+    let chargeP = Math.min(1, this.chargeTimer / 40); ctx.save(); ctx.globalCompositeOperation = 'lighter';
+    let cgGrad = ctx.createRadialGradient(fistX, fistY, 0, fistX, fistY, 50 * chargeP); cgGrad.addColorStop(0, '#fff'); cgGrad.addColorStop(0.2, '#ff0033'); cgGrad.addColorStop(1, 'transparent'); ctx.fillStyle = cgGrad; ctx.beginPath(); ctx.arc(fistX, fistY, 50*chargeP, 0, Math.PI*2); ctx.fill();
+    
+    ctx.translate(fistX, fistY);
+    for(let z=0; z<3; z++) { 
+        ctx.save(); 
+        let pulse = Math.sin(gameEngine.frameCount * 0.5 + z) * 4 * chargeP;
+        ctx.rotate(gameEngine.frameCount*0.15 * (z%2===0?1:-1) + z*(Math.PI/2)); 
+        
+        ctx.beginPath(); ctx.strokeStyle = `rgba(255, 50, 50, ${0.8*chargeP})`; ctx.lineWidth = 5 * chargeP; 
+        ctx.ellipse(0, 0, (70 * chargeP) + pulse, 15 * chargeP, Math.PI/4 + z, 0, Math.PI*2); ctx.stroke(); 
+        
+        ctx.beginPath(); ctx.strokeStyle = `rgba(255, 255, 255, ${0.9*chargeP})`; ctx.lineWidth = 1.5 * chargeP; 
+        ctx.ellipse(0, 0, (70 * chargeP) + pulse, 15 * chargeP, Math.PI/4 + z, 0, Math.PI*2); ctx.stroke(); 
+        ctx.restore(); 
+    } 
+    ctx.restore();
+}
+
+if ((this.currentState === 'ability_i' || this.currentState === 'bf_slow_punch') && this.charName === 'Yuji') {
+    let bfAura = this.blackFlashSuccess || this.currentState === 'bf_slow_punch'; let slowPunchProgress = this.currentState === 'bf_slow_punch' ? (this.stateFrameTimer / 30) : 1;
+    if (bfAura && (this.currentState !== 'bf_slow_punch' || this.stateFrameTimer > 5)) {
+        for (let i = 0; i < 3; i++) {
+            ctx.beginPath(); ctx.moveTo(2 + torsoLean, -4 + bodyBounce); 
+            for(let j=0; j<4; j++) { let p = (j+1)/4; let armX = (2 + torsoLean) * (1-p) + fistX * p; let armY = (-4 + bodyBounce) * (1-p) + fistY * p; let boltX = armX + (Math.random() - 0.5) * 15 * slowPunchProgress; let boltY = armY + (Math.random() - 0.5) * 15 * slowPunchProgress; ctx.lineTo(boltX, boltY); }
+            ctx.strokeStyle = '#ff0000'; ctx.lineWidth = 4 * slowPunchProgress; ctx.stroke(); ctx.strokeStyle = '#000000'; ctx.lineWidth = 2 * slowPunchProgress; ctx.stroke();
+        }
+    } else if (!bfAura) {
+        ctx.globalAlpha = 0.6; let flicker = Math.sin(gameEngine.frameCount * 0.5) * 3; let fWidth = 14 + flicker; let fHeight = 22 + flicker * 1.5; ctx.fillStyle = '#00c3ff';
+        ctx.beginPath(); ctx.moveTo(fistX, fistY + 4); ctx.quadraticCurveTo(fistX + fWidth, fistY + 4, fistX + fWidth/2, fistY - fHeight/2); ctx.quadraticCurveTo(fistX, fistY - fHeight, fistX - fWidth/2, fistY - fHeight/2); ctx.quadraticCurveTo(fistX - fWidth, fistY + 4, fistX, fistY + 4); ctx.fill(); ctx.fillStyle = '#e6f7ff';
+        ctx.beginPath(); ctx.moveTo(fistX, fistY + 2); ctx.quadraticCurveTo(fistX + fWidth/2, fistY + 2, ctx.fistX + fWidth/4, fistY - fHeight/3); ctx.quadraticCurveTo(fistX, fistY - fHeight/1.5, fistX - fWidth/4, fistY - fHeight/3); ctx.quadraticCurveTo(fistX - fWidth/2, fistY + 2, fistX, fistY + 2); ctx.fill(); if (gameEngine.frameCount % 3 === 0) { gameEngine.particles.push(new ParticleEffect(fistX + (Math.random()-0.5)*8, fistY - 5, 0, -2, '#00c3ff')); } ctx.globalAlpha = 1;
+    }
+}
+drawWithOutline('#ffcca6', -7 + torsoLean, headY, 14, 14);
+
+if (this.charName === 'Yuji') { ctx.fillStyle = stats.hairColor; ctx.fillRect(-9 + torsoLean, headY - 4, 18, 6); ctx.fillRect(-8 + torsoLean, headY - 8, 4, 4); ctx.fillRect(-2 + torsoLean, headY - 7, 5, 3); ctx.fillRect(5 + torsoLean, headY - 8, 4, 4); if (this.isTransformed) { ctx.fillStyle = '#111'; ctx.fillRect(-7 + torsoLean, headY + 2, 14, 2); ctx.fillRect(-5 + torsoLean, headY - 2, 3, 3); ctx.fillRect(2 + torsoLean, headY - 2, 3, 3); ctx.fillRect(-8 + torsoLean, headY + 6, 4, 2); ctx.fillRect(4 + torsoLean, headY + 6, 4, 2); } else { ctx.fillStyle = '#223042'; ctx.fillRect(torsoLean, headY + 2, 3, 3); ctx.fillRect(torsoLean + 6, headY + 2, 3, 3); } } 
+else if (this.charName === 'Yuta') { ctx.fillStyle = stats.hairColor; ctx.fillRect(-9 + torsoLean, headY - 6, 18, 8); ctx.fillRect(-10 + torsoLean, headY - 10, 6, 6); drawWithOutline('#04040a', -9 + torsoLean, headY + 1, 18, 6); } 
+else { ctx.fillStyle = stats.hairColor; ctx.fillRect(-9 + torsoLean, headY - 10, 18, 12); ctx.fillRect(-10 + torsoLean, headY - 14, 6, 6); ctx.fillRect(-2 + torsoLean, headY - 16, 6, 8); ctx.fillRect(6 + torsoLean, headY - 13, 5, 5); drawWithOutline('#04040a', -9 + torsoLean, headY + 1, 18, 6); }
+
+if (this.currentState === 'guarding' || this.currentState === 'parry_stance') { ctx.fillStyle = this.currentState === 'parry_stance' ? 'rgba(0, 255, 100, 0.6)' : 'rgba(255, 200, 0, 0.5)'; for (let xOffset = -10; xOffset < 15; xOffset += 5) { for (let yOffset = -30; yOffset < 10; yOffset += 5) { if (Math.random() > 0.3) { ctx.fillRect(xOffset, yOffset, 3, 3); } } } }
+ctx.restore();
+}
+}
+
+4. assets/scripts/systems/mechanics.js
+
+This file contains the complex systems like Domain Expansions and Clash
+mechanics.
+
+const domainExpansionSystem = { isActive: false, timer: 0, casterPlayerId: -1, currentStep: 0, domainType: 'void', floatingMathSymbols: [], shards:[], galaxyLines: null, splats: null, voidStreaks: null,
+getShatterTime: function() {
+    if(this.domainType === 'void') return 1160;
+    if(this.domainType === 'shrine') return 600;
+    if(this.domainType === 'yuta') return 1200; 
+    return 600;
+},
+getEndTime: function() {
+    return this.getShatterTime() + 180;
+}
+};
+
+const hollowPurpleSystem = { isActive: false, timer: 0, step: 0, owner: null };
+
+const domainClashSystem = {
+isActive: false, timer: 0, player1: null, player2: null, scoreP1: 50, scoreP2: 50,
+startClash: function(p1, p2) { this.isActive = true; this.timer = 0; this.player1 = p1; this.player2 = p2; this.scoreP1 = 50; this.scoreP2 = 50; domainExpansionSystem.isActive = false; hollowPurpleSystem.isActive = false; },
+update: function() { if (!this.isActive) return; this.timer++; if (this.player1.isCpu && Math.random() < 0.25) this.scoreP1 += 2; if (this.player2.isCpu && Math.random() < 0.25) this.scoreP2 += 2; if (this.timer >= 300) this.endClash(); },
+endClash: function() {
+this.isActive = false; let p1Wins = this.scoreP1 >= this.scoreP2; let winner = p1Wins ? this.player1 : this.player2; let loser = p1Wins ? this.player2 : this.player1;
+domainExpansionSystem.casterPlayerId = winner.playerId; domainExpansionSystem.domainType = winner.charName === 'Gojo' ? 'void' : (winner.charName === 'Yuta' ? 'yuta' : 'shrine'); domainExpansionSystem.isActive = true; domainExpansionSystem.timer = 125; domainExpansionSystem.currentStep = 3;
+loser.setState('hit_stun'); loser.receiveDamage(30, 0, winner, true); gameEngine.cameraShake = 30;
+},
+draw: function(ctx) {
+if (!this.isActive) return; let ratio = this.scoreP1 / (this.scoreP1 + this.scoreP2); let splitX = LOG_W * ratio;
+ctx.save(); ctx.beginPath(); ctx.rect(0, 0, splitX, LOG_H); ctx.clip(); drawDomainBackground(ctx, this.player1.charName === 'Gojo' ? 'void' : (this.player1.charName === 'Yuta' ? 'yuta' : 'shrine'), this.timer); this.player1.draw(ctx); ctx.restore();
+ctx.save(); ctx.beginPath(); ctx.rect(splitX, 0, LOG_W - splitX, LOG_H); ctx.clip(); drawDomainBackground(ctx, this.player2.charName === 'Gojo' ? 'void' : (this.player2.charName === 'Yuta' ? 'yuta' : 'shrine'), this.timer); this.player2.draw(ctx); ctx.restore();
+ctx.fillStyle = '#fff'; ctx.fillRect(splitX - 2, 0, 4, LOG_H); ctx.fillStyle = '#000'; ctx.fillRect(splitX - 1, 0, 2, LOG_H);
+} };
+
+function startHollowPurpleSequence(player) {
+if (hollowPurpleSystem.isActive) return;
+hollowPurpleSystem.isActive = true; hollowPurpleSystem.timer = 0; hollowPurpleSystem.step = 1; hollowPurpleSystem.owner = player; player.setState('hollow_purple_charge'); player.spMeter = 0; 
+soundManager.play('hollow_purple'); soundManager.play('custom_voicemod');
+let targetX = player.x + (40 * player.facingDir);
+gameEngine.projectiles.push(new CombatProjectile('hp_blue_orb', targetX - (100 * player.facingDir), player.y - 15, 1 * player.facingDir, player)); 
+gameEngine.projectiles.push(new CombatProjectile('hp_red_orb', targetX + (100 * player.facingDir), player.y - 15, -1 * player.facingDir, player));
+}
+
+function triggerUltimate(player) {
+if (player.charName === 'Gojo' || player.charName === 'Yuta') { player.ultMeter = 0; triggerDomainExpansion(player);
+} else { if (player.isTransformed) return; player.ultMeter = 0; player.sukunaDomainBar = 0; soundManager.play('sukunaTransform'); player.isTransformed = true; player.transformTimer = 40 * 60; document.getElementById(`hud-name-p${player.playerId+1}`).innerText = "SUKUNA"; showCinematicMessage("OVERTAKEN", "#ff003c", 150); }
+}
+
+function triggerDomainExpansion(player) {
+const isGojo = player.charName === 'Gojo'; const isSukuna = player.isTransformed; const isYuta = player.charName === 'Yuta';
+if (!isGojo && !isSukuna && !isYuta) return;
+
+if (domainExpansionSystem.isActive && domainExpansionSystem.casterPlayerId !== player.playerId) {
+    let activeTimer = domainExpansionSystem.timer; let canClash = activeTimer < (domainExpansionSystem.getShatterTime() - 120);
+    if (!canClash) return; 
+    let p1 = gameEngine.roster[0]; let p2 = gameEngine.roster[1]; if (isSukuna || isYuta) player.hasUsedDomain = true; domainClashSystem.startClash(p1, p2); return;
+}
+domainExpansionSystem.isActive = true; domainExpansionSystem.timer = 0; domainExpansionSystem.casterPlayerId = player.playerId; domainExpansionSystem.domainType = isGojo ? 'void' : (isYuta ? 'yuta' : 'shrine'); domainExpansionSystem.floatingMathSymbols =[];
+player.setState('domain_chant');
+if (isSukuna || isYuta) player.hasUsedDomain = true;
+if (isGojo) soundManager.play('gojo_domain_expansion'); else soundManager.play('domainExpansion');
+}
+
+function drawDomainBackground(ctx, type, timer) {
+if (type === 'void') {
+    let pulse = Math.sin(timer * 0.05) * 0.1; let bhR = 38 * (1 + pulse);
+    ctx.fillStyle = "#030610"; ctx.fillRect(0,0,LOG_W,LOG_H);
+    ctx.globalCompositeOperation = 'lighter';
+    let nebula = ctx.createLinearGradient(40, 180, 380, 60); nebula.addColorStop(0, "rgba(50,100,160,0)"); nebula.addColorStop(0.3, "rgba(80,140,210,0.15)"); nebula.addColorStop(0.5, "rgba(200,240,255,0.4)"); nebula.addColorStop(0.7, "rgba(80,140,210,0.15)"); nebula.addColorStop(1, "rgba(50,100,160,0)");
+    ctx.fillStyle = nebula; ctx.beginPath(); ctx.ellipse(210, 120, 200, 60, -Math.PI/6, 0, Math.PI*2); ctx.fill(); ctx.beginPath(); ctx.ellipse(210, 120, 100, 30, -Math.PI/6, 0, Math.PI*2); ctx.fill();
+    ctx.globalCompositeOperation = 'source-over';
+    if (!domainExpansionSystem.voidStreaks) { domainExpansionSystem.voidStreaks =[]; for(let i=0; i<30; i++) { domainExpansionSystem.voidStreaks.push({ x: Math.random()*LOG_W, y: Math.random()*LOG_H, w: Math.random()*15+2, h: Math.random()*1.5+0.5, opacity: Math.random()*0.8 }); } }
+    ctx.save(); ctx.fillStyle = "#ffffff"; for(let s of domainExpansionSystem.voidStreaks) { ctx.globalAlpha = s.opacity + Math.sin((timer+s.x)*0.05)*0.2; ctx.beginPath(); ctx.ellipse(s.x, s.y, s.w, s.h, -Math.PI/5.5, 0, Math.PI*2); ctx.fill(); } ctx.restore();
+
+    let haloR = bhR * 1.3; let outerGlow = ctx.createRadialGradient(210, 120, bhR, 210, 120, haloR*4);
+    outerGlow.addColorStop(0, "#ffffff"); outerGlow.addColorStop(0.2, "rgba(140, 205, 250, 0.9)"); outerGlow.addColorStop(0.5, "rgba(45, 95, 150, 0.4)"); outerGlow.addColorStop(1, "rgba(0, 0, 0, 0)");
+    ctx.globalCompositeOperation = 'lighter'; ctx.fillStyle = outerGlow; ctx.beginPath(); ctx.arc(210, 120, haloR*4, 0, Math.PI*2); ctx.fill(); ctx.globalCompositeOperation = 'source-over';
+    
+    ctx.save(); ctx.translate(210, 120); ctx.lineWidth = 3; ctx.strokeStyle = "rgba(170, 220, 255, 0.9)"; ctx.beginPath(); ctx.arc(0, 0, haloR*1.15, 0, Math.PI*2); ctx.stroke();
+    ctx.lineWidth = 1.5; ctx.strokeStyle = "rgba(110, 180, 230, 0.7)"; ctx.beginPath(); ctx.arc(0, 0, haloR*1.6, -Math.PI/2, Math.PI); ctx.stroke(); ctx.beginPath(); ctx.arc(0, 0, haloR*1.4, Math.PI/3, Math.PI*1.5); ctx.stroke();
+    ctx.lineWidth = 6; ctx.strokeStyle = "rgba(70, 130, 180, 0.4)"; ctx.beginPath(); ctx.arc(0, 0, haloR*2.1, 0, Math.PI*2); ctx.stroke();
+    let ringShade = ctx.createRadialGradient(0,0, haloR*0.7, 0,0, haloR*1.5); ringShade.addColorStop(0, "rgba(10, 25, 50, 0.6)"); ringShade.addColorStop(1, "rgba(0,0,0,0)"); ctx.fillStyle = ringShade; ctx.beginPath(); ctx.arc(0, 0, haloR*1.5, 0, Math.PI*2); ctx.fill(); ctx.restore();
+
+    ctx.fillStyle = "#000000"; ctx.beginPath(); ctx.arc(210, 120, bhR, 0, Math.PI*2); ctx.fill();
+    
+    if(!domainExpansionSystem.splats) domainExpansionSystem.splats =[];
+    while(domainExpansionSystem.splats.length < 6) { 
+        let isBlack = domainExpansionSystem.splats.filter(s=>s.color === '#000').length < 3; let cx, cy, rad, c;
+        if(isBlack) { let angle = Math.random() * Math.PI*2; let dist = bhR * 1.5 + (Math.random()*30); cx = 210 + Math.cos(angle) * dist; cy = 120 + Math.sin(angle) * dist; rad = 5 + Math.random()*8; c = '#000'; } 
+        else { cx = (Math.random() < 0.5 ? -10 + Math.random()*100 : 320 + Math.random()*100); cy = Math.random()*240; if (Math.random()<0.2) { cx=100+Math.random()*220; cy=20+Math.random()*200;} rad = 8 + Math.random()*15; c = '#fff'; }
+        let sats =[]; for(let d=0; d<(Math.random()*5+2); d++){ sats.push({ ox: (Math.random()-0.5)*(rad*3), oy: (Math.random()-0.5)*(rad*3), r: Math.max(1, rad*0.2 + Math.random()*(rad*0.3)) }); }
+        for(let d=0; d<3; d++){ sats.push({ slash: true, ox: (Math.random()-0.5)*(rad*4), oy: (Math.random()-0.5)*(rad*4), r: rad*1.5, angle: -Math.PI/6 + (Math.random()-0.5)*0.2 }); } domainExpansionSystem.splats.push({ color: c, baseRad: rad, x: cx, y: cy, sats: sats, life: 0, maxLife: 120 + Math.random()*80 });
+    }
+    for(let i=domainExpansionSystem.splats.length-1; i>=0; i--) {
+        let sp = domainExpansionSystem.splats[i]; sp.life++; let progress = sp.life / sp.maxLife; let currentOpacity = Math.sin(progress * Math.PI); 
+        if(progress >= 1) { domainExpansionSystem.splats.splice(i,1); continue; } ctx.save(); ctx.globalAlpha = Math.max(0, currentOpacity * 1.5); 
+        if (sp.color === '#fff') { ctx.shadowColor = '#ffffff'; ctx.shadowBlur = 15; } ctx.fillStyle = sp.color; ctx.beginPath(); ctx.arc(sp.x, sp.y, sp.baseRad, 0, Math.PI*2); ctx.fill();
+        for(let drop of sp.sats) { if (drop.slash && sp.color==='#fff') { ctx.save(); ctx.translate(sp.x + drop.ox, sp.y + drop.oy); ctx.rotate(drop.angle); ctx.beginPath(); ctx.ellipse(0, 0, drop.r, drop.r*0.1, 0, 0, Math.PI*2); ctx.fill(); ctx.restore(); } 
+        else if (!drop.slash) { ctx.beginPath(); ctx.arc(sp.x + drop.ox, sp.y + drop.oy, drop.r, 0, Math.PI*2); ctx.fill(); } } ctx.restore();
+    }
+} else if (type === 'shrine') {
+    let topBg = ctx.createLinearGradient(0, 0, 0, 135); topBg.addColorStop(0, "#3a0000"); topBg.addColorStop(0.5, "#880000"); topBg.addColorStop(1, "#0a0000"); ctx.fillStyle = topBg; ctx.fillRect(0, 0, LOG_W, 135); ctx.fillStyle = "rgba(10, 0, 0, 0.4)"; for (let i = 0; i < 20; i++) { ctx.beginPath(); ctx.arc(Math.random()*LOG_W, Math.random()*135, Math.random()*60, 0, Math.PI*2); ctx.fill(); }
+    let botBg = ctx.createLinearGradient(0, 135, 0, LOG_H); botBg.addColorStop(0, "#002b36"); botBg.addColorStop(0.5, "#005c6a"); botBg.addColorStop(1, "#001f29"); ctx.fillStyle = botBg; ctx.fillRect(0, 135, LOG_W, 105); ctx.fillStyle = "rgba(0, 20, 30, 0.6)"; for (let i = 0; i < 40; i++) { ctx.fillRect(Math.random()*LOG_W, 135 + Math.random()*105, Math.random()*40, 2); }
+    let waveScale = Math.sin(timer*0.05)*3;
+    const drawPillars = (mirrored) => {
+        let alpha = mirrored ? 0.35 : 1.0; let mFlip = mirrored ? -1 : 1; ctx.globalAlpha = alpha; ctx.fillStyle = "#010f14"; ctx.fillRect(30, 135, 30, mFlip*100 + waveScale); ctx.fillStyle = "rgba(0, 200, 255, 0.1)"; ctx.fillRect(55, 135, 5, mFlip*100 + waveScale); ctx.fillStyle = "#010f14"; ctx.fillRect(LOG_W-60, 135, 30, mFlip*100 + waveScale); ctx.fillStyle = "rgba(0, 200, 255, 0.1)"; ctx.fillRect(LOG_W-60, 135, 5, mFlip*100 + waveScale); ctx.globalAlpha = 1.0;
+    };
+    const drawShrine = (mirrored) => {
+        let mFlip = mirrored ? -1 : 1; let cX = 210, cY = 135; let gAlpha = mirrored ? 0.3 : 1.0; ctx.save(); ctx.translate(cX, cY); ctx.scale(1, mFlip); ctx.globalAlpha = gAlpha;
+        ctx.fillStyle = "#080404"; ctx.beginPath(); ctx.moveTo(-60, 0); ctx.lineTo(-40, -100); ctx.lineTo(40, -100); ctx.lineTo(60, 0); ctx.fill(); ctx.fillStyle = "#ff1100"; ctx.beginPath(); ctx.moveTo(-50, -50); ctx.quadraticCurveTo(0, -40, 50, -50); ctx.lineTo(45, -55); ctx.quadraticCurveTo(0, -45, -45, -55); ctx.fill(); ctx.beginPath(); ctx.moveTo(-45, -95); ctx.quadraticCurveTo(0, -85, 45, -95); ctx.lineTo(40, -100); ctx.quadraticCurveTo(0, -90, -40, -100); ctx.fill();
+        ctx.fillStyle = "#fff"; ctx.shadowColor="#fff"; ctx.shadowBlur = 5; ctx.fillRect(-15, -40, 30, 10); ctx.shadowBlur = 0; ctx.fillStyle="#000"; for(let i=-12; i<15; i+=5){ ctx.fillRect(i, -38, 2, 8); ctx.fillRect(i, -30, 2, 4); } ctx.fillRect(-20, -32, 10, 2); ctx.fillRect(10, -32, 10, 2); ctx.fillStyle = "#220000"; ctx.fillRect(-45, 0, 15, -90); ctx.fillRect(30, 0, 15, -90); ctx.fillStyle = "#660000"; ctx.fillRect(-42, 0, 5, -88); ctx.fillRect(33, 0, 5, -88); ctx.strokeStyle = "rgba(255, 200, 255, 0.4)"; ctx.beginPath(); ctx.arc(-25, -98, 15, 0, Math.PI, true); ctx.arc(25, -98, 15, 0, Math.PI, true); ctx.stroke();
+        ctx.fillStyle = "#110a0a"; ctx.beginPath(); ctx.moveTo(-80, 0); ctx.quadraticCurveTo(0, 15, 80, 0); ctx.lineTo(70, -10); ctx.lineTo(-70, -10); ctx.fill(); ctx.fillStyle = "#a82000"; ctx.beginPath(); ctx.moveTo(-75, -5); ctx.lineTo(75, -5); ctx.stroke(); ctx.fillStyle = "rgba(0, 255, 255, 0.4)"; ctx.beginPath(); ctx.arc(0, -92, 4, 0, Math.PI*2); ctx.fill(); ctx.restore();
+    }; drawPillars(false); drawShrine(false); drawPillars(true); drawShrine(true);
+    let horGlow = ctx.createLinearGradient(0, 125, 0, 145); horGlow.addColorStop(0,"rgba(200,255,255,0)"); horGlow.addColorStop(0.5,"rgba(200,255,255,0.2)"); horGlow.addColorStop(1,"rgba(200,255,255,0)"); ctx.fillStyle = horGlow; ctx.fillRect(0, 125, LOG_W, 20);
+} else if (type === 'yuta') {
+    ctx.fillStyle = "#462255"; ctx.fillRect(0,0,LOG_W, LOG_H);
+    let grad = ctx.createLinearGradient(0,0,0, LOG_H);
+    grad.addColorStop(0, "rgba(255, 0, 179, 0.4)");
+    grad.addColorStop(1, "rgba(0,0,0,0.5)");
+    ctx.fillStyle = grad; ctx.fillRect(0,0,LOG_W,LOG_H);
+    
+    for(let i=0; i<30; i++) {
+        let x = (i * 73 + timer*0.5) % LOG_W;
+        let y = (i * 31) % LOG_H;
+        let prog = (timer/600) * 1.5;
+        ctx.fillStyle = "rgba(255, 255, 255, 0.3)";
+        ctx.beginPath();
+        ctx.moveTo(x,y);
+        ctx.quadraticCurveTo(x + 10*prog, y - 20, x, y-40);
+        ctx.quadraticCurveTo(x - 10*prog, y-20, x, y);
+        ctx.fill();
+    }
+    
+    ctx.fillStyle = "rgba(255,100,200, 0.1)";
+    for(let i=0; i<8; i++){
+        ctx.beginPath();
+        ctx.ellipse(LOG_W/2, LOG_H/2, (i*40 + timer*0.2) % 300, 20, Math.PI/4, 0, Math.PI*2);
+        ctx.fill();
+    }
+    
+    for(let i=0; i<15; i++) {
+        let x = (i * 30) + 15;
+        let y = GROUND_Y;
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.rotate(Math.PI + Math.PI/12);
+        ctx.fillStyle = '#222'; ctx.fillRect(-2, -5, 4, 12);
+        ctx.fillStyle = '#d4af37'; ctx.fillRect(-5, -6, 10, 3);
+        ctx.fillStyle = '#999';
+        ctx.beginPath(); ctx.moveTo(-2, -6); ctx.lineTo(-1, -45); ctx.lineTo(0, -48); ctx.lineTo(1, -45); ctx.lineTo(2, -6); ctx.fill();
+        ctx.fillStyle = '#ccc';
+        ctx.beginPath(); ctx.moveTo(0, -6); ctx.lineTo(0, -38); ctx.lineTo(1, -35); ctx.lineTo(1, -6); ctx.fill();
+        ctx.restore();
+    }
+    ctx.fillStyle="#1c0e21"; ctx.fillRect(0,GROUND_Y-2, LOG_W, 35);
+}
+}
+
+function drawCinematicIntros(ctx, t) {
+    let p1 = gameEngine.roster[0]; let p2 = gameEngine.roster[1];
+    
+    if (t > 180) { 
+        let prog = 1 - (t - 180)/180; 
+        ctx.fillStyle = 'rgba(10, 10, 10, 0.9)'; ctx.fillRect(0, 0, LOG_W, LOG_H); ctx.save();
+        if (p1.charName === 'Gojo') {
+            let sunGrad = ctx.createLinearGradient(0,0,LOG_W,LOG_H); sunGrad.addColorStop(0, "#ffe87a"); sunGrad.addColorStop(0.5, "#cc9a00"); sunGrad.addColorStop(1, "#331100");
+            ctx.globalAlpha = 0.5 + (0.5 * Math.sin(prog * Math.PI)); ctx.fillStyle = sunGrad; ctx.fillRect(0,0,LOG_W,LOG_H);
+            ctx.globalCompositeOperation = 'lighter'; ctx.beginPath(); let rayL = LOG_W * 1.5; ctx.translate(150, 100); ctx.rotate(prog * 0.1);
+            for(let a=0; a<Math.PI*2; a+=0.3){ ctx.fillStyle = "rgba(255, 250, 150, 0.2)"; ctx.moveTo(0,0); ctx.lineTo(Math.cos(a)*rayL, Math.sin(a)*rayL); ctx.lineTo(Math.cos(a+0.1)*rayL, Math.sin(a+0.1)*rayL); } ctx.fill(); ctx.restore();
+            
+            ctx.save(); ctx.translate(150, 120 + Math.sin(prog*4)*10); ctx.scale(3.5, 3.5); 
+            let oX = p1.x, oY = p1.y, oldS = p1.currentState, oF = p1.facingDir;
+            p1.facingDir = 1; p1.currentState='idle'; p1.x=0; p1.y=0; 
+            p1.draw(ctx); 
+            p1.x = oX; p1.y = oY; p1.currentState = oldS; p1.facingDir = oF;
+            ctx.restore();
+            
+            if (prog > 0.3) { ctx.fillStyle = "#000"; ctx.beginPath(); ctx.ellipse(320, 80, 80, 50, Math.PI/12, 0, Math.PI*2); ctx.fill(); ctx.fillStyle = "#fff"; ctx.font = "8px 'Press Start 2P'"; ctx.textAlign="center"; ctx.fillText("THROUGHOUT", 320, 70); ctx.fillText("HEAVEN & EARTH,", 320, 90); }
+            if (prog > 0.6) { ctx.fillStyle = "#000"; ctx.beginPath(); ctx.ellipse(120, 180, 60, 40, -Math.PI/12, 0, Math.PI*2); ctx.fill(); ctx.fillStyle = "#fff"; ctx.font = "7px 'Press Start 2P'"; ctx.textAlign="center"; ctx.fillText("I ALONE AM", 120, 175); ctx.fillText("THE HONORED ONE", 120, 190); }
+        } 
+        else if (p1.charName === 'Yuji') {
+            ctx.fillStyle = '#0a0005'; ctx.fillRect(0,0,LOG_W,LOG_H); if(Math.random()<0.1) { ctx.fillStyle="rgba(255,255,255,0.2)"; ctx.fillRect(0,0,LOG_W,LOG_H); }
+            ctx.save(); ctx.translate(150, 160 + (prog*10)); ctx.scale(4,4); 
+            let oX = p1.x, oY = p1.y, oldS = p1.currentState, oF = p1.facingDir;
+            p1.facingDir = 1; p1.currentState='ability_i'; p1.x=0; p1.y=0; 
+            p1.draw(ctx); 
+            p1.x = oX; p1.y = oY; p1.currentState = oldS; p1.facingDir = oF;
+            ctx.restore();
+            if (prog > 0.4) { ctx.fillStyle = "#000"; ctx.beginPath(); ctx.ellipse(300, 100, 70, 50, 0, 0, Math.PI*2); ctx.fill(); ctx.fillStyle = "#fff"; ctx.font = "10px 'Press Start 2P'"; ctx.textAlign="center"; ctx.fillText("LET'S EXORCISE", 300, 95); ctx.fillText("THEM!", 300, 115); }
+        }
+        else {
+            ctx.fillStyle = '#100515'; ctx.fillRect(0,0,LOG_W,LOG_H); for(let i=0; i<15; i++) { ctx.fillStyle="rgba(200, 100, 200, 0.2)"; ctx.fillRect((prog*1000 + i*50)%LOG_W, i*20, 40, 2); }
+            ctx.save(); ctx.translate(150 + prog*20, 120); ctx.scale(3.5,3.5); 
+            let oX = p1.x, oY = p1.y, oldS = p1.currentState, oF = p1.facingDir;
+            p1.facingDir = 1; p1.currentState='idle'; p1.x=0; p1.y=0; 
+            p1.draw(ctx); 
+            p1.x = oX; p1.y = oY; p1.currentState = oldS; p1.facingDir = oF;
+            ctx.restore();
+            if (prog > 0.4) { ctx.fillStyle = "#000"; ctx.beginPath(); ctx.ellipse(300, 100, 80, 50, 0, 0, Math.PI*2); ctx.fill(); ctx.fillStyle = "#fff"; ctx.font = "8px 'Press Start 2P'"; ctx.textAlign="center"; ctx.fillText("COME,", 300, 95); ctx.fillText("RIKA!", 300, 110); }
+        } ctx.restore();
+    }
+    else if (t > 0) {
+        let prog = 1 - t/180;
+        ctx.fillStyle = 'rgba(10, 10, 10, 0.9)'; ctx.fillRect(0, 0, LOG_W, LOG_H); ctx.save();
+        if (p2.charName === 'Gojo') {
+            let sunGrad = ctx.createLinearGradient(0,0,LOG_W,LOG_H); sunGrad.addColorStop(0, "#ffe87a"); sunGrad.addColorStop(0.5, "#cc9a00"); sunGrad.addColorStop(1, "#331100"); ctx.globalAlpha = 0.5 + (0.5 * Math.sin(prog * Math.PI)); ctx.fillStyle = sunGrad; ctx.fillRect(0,0,LOG_W,LOG_H);
+            ctx.globalCompositeOperation = 'lighter'; ctx.beginPath(); let rayL = LOG_W * 1.5; ctx.translate(270, 100); ctx.rotate(prog * 0.1);
+            for(let a=0; a<Math.PI*2; a+=0.3){ ctx.fillStyle = "rgba(255, 250, 150, 0.2)"; ctx.moveTo(0,0); ctx.lineTo(Math.cos(a)*rayL, Math.sin(a)*rayL); ctx.lineTo(Math.cos(a+0.1)*rayL, Math.sin(a+0.1)*rayL); } ctx.fill(); ctx.restore();
+            
+            ctx.save(); ctx.translate(270, 120 + Math.sin(prog*4)*10); ctx.scale(3.5, 3.5); 
+            let oX = p2.x, oY = p2.y, oldS = p2.currentState, oF = p2.facingDir;
+            p2.facingDir = -1; p2.currentState='idle'; p2.x=0; p2.y=0; 
+            p2.draw(ctx); 
+            p2.x = oX; p2.y = oY; p2.currentState = oldS; p2.facingDir = oF;
+            ctx.restore();
+            
+            if (prog > 0.3) { ctx.fillStyle = "#000"; ctx.beginPath(); ctx.ellipse(100, 80, 80, 50, Math.PI/12, 0, Math.PI*2); ctx.fill(); ctx.fillStyle = "#fff"; ctx.font = "8px 'Press Start 2P'"; ctx.textAlign="center"; ctx.fillText("THROUGHOUT", 100, 70); ctx.fillText("HEAVEN & EARTH,", 100, 90); }
+            if (prog > 0.6) { ctx.fillStyle = "#000"; ctx.beginPath(); ctx.ellipse(300, 180, 60, 40, -Math.PI/12, 0, Math.PI*2); ctx.fill(); ctx.fillStyle = "#fff"; ctx.font = "7px 'Press Start 2P'"; ctx.textAlign="center"; ctx.fillText("I ALONE AM", 300, 175); ctx.fillText("THE HONORED ONE", 300, 190); }
+        }
+        else if (p2.charName === 'Yuji') {
+            ctx.fillStyle = '#0a0005'; ctx.fillRect(0,0,LOG_W,LOG_H); if(Math.random()<0.1) { ctx.fillStyle="rgba(255,255,255,0.2)"; ctx.fillRect(0,0,LOG_W,LOG_H); }
+            ctx.save(); ctx.translate(270, 160 + (prog*10)); ctx.scale(4,4); 
+            let oX = p2.x, oY = p2.y, oldS = p2.currentState, oF = p2.facingDir;
+            p2.facingDir = -1; p2.currentState='ability_i'; p2.x=0; p2.y=0; 
+            p2.draw(ctx); 
+            p2.x = oX; p2.y = oY; p2.currentState = oldS; p2.facingDir = oF;
+            ctx.restore();
+            if (prog > 0.4) { ctx.fillStyle = "#000"; ctx.beginPath(); ctx.ellipse(120, 100, 70, 50, 0, 0, Math.PI*2); ctx.fill(); ctx.fillStyle = "#fff"; ctx.font = "10px 'Press Start 2P'"; ctx.textAlign="center"; ctx.fillText("LET'S EXORCISE", 120, 95); ctx.fillText("THEM!", 120, 115); }
+        }
+        else {
+            ctx.fillStyle = '#100515'; ctx.fillRect(0,0,LOG_W,LOG_H); for(let i=0; i<15; i++) { ctx.fillStyle="rgba(200, 100, 200, 0.2)"; ctx.fillRect((-prog*1000 + i*50 + 2000)%LOG_W, i*20, 40, 2); }
+            ctx.save(); ctx.translate(270 - prog*20, 120); ctx.scale(3.5,3.5); 
+            let oX = p2.x, oY = p2.y, oldS = p2.currentState, oF = p2.facingDir;
+            p2.facingDir = -1; p2.currentState='idle'; p2.x=0; p2.y=0; 
+            p2.draw(ctx); 
+            p2.x = oX; p2.y = oY; p2.currentState = oldS; p2.facingDir = oF;
+            ctx.restore();
+            if (prog > 0.4) { ctx.fillStyle = "#000"; ctx.beginPath(); ctx.ellipse(120, 100, 80, 50, 0, 0, Math.PI*2); ctx.fill(); ctx.fillStyle = "#fff"; ctx.font = "8px 'Press Start 2P'"; ctx.textAlign="center"; ctx.fillText("COME,", 120, 95); ctx.fillText("RIKA!", 120, 110); }
+        } ctx.restore();
+    }
+}
+
+5. assets/scripts/core/game.js
+
+This final file handles the main game loop, hitstop, screen shakes, matching
+logic, and ties it all together!
+
+function gameLoop() {
+if (!gameEngine.isRunning) return; gameEngine.frameCount++; 
+ctx.setTransform(UI_UPSCALE, 0, 0, UI_UPSCALE, 0, 0); ctx.clearRect(0, 0, LOG_W, LOG_H);
+const hud = document.getElementById('combat-hud');
+
+if (gameEngine.vsScreenTimer > 0) {
+    if (hud.style.display !== 'none') hud.style.display = 'none'; gameEngine.vsScreenTimer--; 
+    ctx.fillStyle = '#0b0510'; ctx.fillRect(0, 0, LOG_W/2, LOG_H); ctx.fillStyle = '#1a0505'; ctx.fillRect(LOG_W/2, 0, LOG_W/2, LOG_H); ctx.fillStyle = '#fff'; ctx.fillRect(LOG_W/2 - 2, 0, 4, LOG_H);
+    
+    let p1 = gameEngine.roster[0]; let p2 = gameEngine.roster[1];
+    
+    ctx.save(); ctx.translate(LOG_W/4, LOG_H/2 + 50); ctx.scale(2.5, 2.5); 
+    let oX = p1.x, oY = p1.y, oS = p1.currentState, oF = p1.facingDir; 
+    p1.x = 0; p1.y = 0; p1.currentState = 'idle'; p1.facingDir = 1;
+    p1.draw(ctx); 
+    p1.x = oX; p1.y = oY; p1.currentState = oS; p1.facingDir = oF;
+    ctx.restore();
+    
+    ctx.save(); ctx.translate(LOG_W*0.75, LOG_H/2 + 50); ctx.scale(2.5, 2.5); 
+    let oX2 = p2.x, oY2 = p2.y, oS2 = p2.currentState, oF2 = p2.facingDir; 
+    p2.x = 0; p2.y = 0; p2.currentState = 'idle'; p2.facingDir = -1;
+    p2.draw(ctx); 
+    p2.x = oX2; p2.y = oY2; p2.currentState = oS2; p2.facingDir = oF2;
+    ctx.restore();
+    
+    ctx.fillStyle = '#fff'; ctx.font = "30px 'Press Start 2P'"; ctx.textAlign = 'center'; ctx.strokeStyle = '#ff003c'; ctx.lineWidth = 6;
+    let pt = Math.sin(gameEngine.vsScreenTimer * 0.1) * 2; ctx.strokeText("VS", LOG_W/2, LOG_H/2 - 20 + pt); ctx.fillText("VS", LOG_W/2, LOG_H/2 - 20 + pt);
+    ctx.font = "12px 'Press Start 2P'"; ctx.fillStyle = '#00d4ff'; ctx.fillText(p1.charName.toUpperCase(), LOG_W/4, LOG_H/2 - 70); ctx.fillStyle = '#ff3333'; ctx.fillText(p2.charName.toUpperCase(), LOG_W*0.75, LOG_H/2 - 70);
+    requestAnimationFrame(gameLoop); return;
+} else if (gameEngine.introTimer > 0) {
+    if (hud.style.display !== 'none') hud.style.display = 'none'; mapManager.drawBackground(ctx); drawCinematicIntros(ctx, gameEngine.introTimer); gameEngine.introTimer--; requestAnimationFrame(gameLoop); return;
+}
+
+if (hud.style.display !== 'block') hud.style.display = 'block';
+
+if (gameEngine.hitStopFrames > 0) gameEngine.hitStopFrames--;
+let shakeX = 0, shakeY = 0; if (gameEngine.cameraShake > 0) { shakeX = (Math.random() - 0.5) * gameEngine.cameraShake; shakeY = (Math.random() - 0.5) * gameEngine.cameraShake; gameEngine.cameraShake *= 0.8; if (gameEngine.cameraShake < 1) gameEngine.cameraShake = 0; } ctx.translate(shakeX, shakeY);
+
+if (domainExpansionSystem.isActive) {
+    let shatterTime = domainExpansionSystem.getShatterTime();
+    if (domainExpansionSystem.timer < shatterTime) {
+        if (domainExpansionSystem.domainType === 'void' && domainExpansionSystem.timer >= 390) { drawDomainBackground(ctx, 'void', domainExpansionSystem.timer); }
+        else if (domainExpansionSystem.domainType === 'shrine' && domainExpansionSystem.timer >= 160) { drawDomainBackground(ctx, 'shrine', domainExpansionSystem.timer); }
+        else if (domainExpansionSystem.domainType === 'yuta' && domainExpansionSystem.timer >= 160) { drawDomainBackground(ctx, 'yuta', domainExpansionSystem.timer); }
+        else { mapManager.drawBackground(ctx); }
+    } else { mapManager.drawBackground(ctx); }
+} else { mapManager.drawBackground(ctx); }
+
+if (domainExpansionSystem.isActive && domainExpansionSystem.domainType === 'void') {
+    let timer = domainExpansionSystem.timer;
+    if (timer < 180) { ctx.fillStyle = `rgba(255, 255, 255, ${timer/180})`; ctx.fillRect(0,0,LOG_W,LOG_H); } else if (timer < 210) { ctx.fillStyle="#fff"; ctx.fillRect(0,0,LOG_W,LOG_H); } 
+    else if (timer < 390) {
+        ctx.fillStyle = "#0a001a"; ctx.fillRect(0,0,LOG_W,LOG_H); ctx.fillStyle = "#fff"; for(let i=0; i<30; i++) ctx.fillRect(Math.random()*LOG_W, Math.random()*LOG_H, 1, 1);
+        if(!domainExpansionSystem.galaxyLines) { domainExpansionSystem.galaxyLines =[ {y: 50, c: '#ff0000', w: 600}, {y: 100, c: '#0044ff', w: 600}, {y: 150, c: '#ff0000', w: 600}, {y: 200, c: '#0044ff', w: 600} ]; }
+        domainExpansionSystem.galaxyLines.forEach(l => { if(Math.random() < 0.05) l.c = l.c === '#ff0000' ? '#0044ff' : '#ff0000'; ctx.fillStyle = l.c; ctx.fillRect(-50 + (Math.random()*10), l.y + (Math.random()*5-2.5), l.w, 3); });
+        
+        if (timer > 340) {
+            let alpha = (timer - 340) / 50;
+            ctx.fillStyle = `rgba(255, 255, 255, ${alpha})`;
+            ctx.fillRect(0, 0, LOG_W, LOG_H);
+        }
+    }
+} else if (domainExpansionSystem.isActive && (domainExpansionSystem.domainType === 'shrine' || domainExpansionSystem.domainType === 'yuta')) {
+    let timer = domainExpansionSystem.timer;
+    if (timer < 30) { ctx.fillStyle = `rgba(0,0,0,${timer/30})`; ctx.fillRect(0,0,LOG_W,LOG_H); }
+    else if (timer < 100) { ctx.fillStyle = '#000'; ctx.fillRect(0,0,LOG_W,LOG_H); } 
+    else if (timer < 160) { 
+        drawDomainBackground(ctx, domainExpansionSystem.domainType, timer); 
+        let alpha = 1 - ((timer - 100) / 60); 
+        if (alpha > 0) { ctx.fillStyle = `rgba(255, 255, 255, ${alpha})`; ctx.fillRect(0, 0, LOG_W, LOG_H); } 
+    }
+}
+
+if (domainClashSystem.isActive) { domainClashSystem.update(); domainClashSystem.draw(ctx); } else {
+
+if (domainExpansionSystem.isActive) {
+    domainExpansionSystem.timer++;
+    
+    if (domainExpansionSystem.timer === 2) {
+        showCinematicMessage("DOMAIN EXPANSION", "#fff", 50, 24);
+    }
+    if (domainExpansionSystem.timer === 55) {
+        let name = domainExpansionSystem.domainType === 'void' ? "UNLIMITED VOID" : (domainExpansionSystem.domainType === 'yuta' ? "TRUE & MUTUAL LOVE" : "MALEVOLENT SHRINE");
+        let col = domainExpansionSystem.domainType === 'void' ? "#00c3ff" : (domainExpansionSystem.domainType === 'yuta' ? '#ff40a1' : "#ff003c");
+        showCinematicMessage(name, col, 80, 26);
+    }
+    if (domainExpansionSystem.domainType === 'void' && domainExpansionSystem.timer === 390) {
+        gameEngine.screenFlash = { color: '#fff', duration: 40, life: 40 };
+    }
+}
+
+let isDomainCinematic = false;
+if (domainExpansionSystem.isActive) { 
+    let shatterPoint = domainExpansionSystem.getShatterTime() - 120;
+    if (domainExpansionSystem.timer < shatterPoint) isDomainCinematic = true; 
+}
+
+if (isDomainCinematic) {
+    gameEngine.roster.forEach(fighter => {
+        if (fighter.playerId !== domainExpansionSystem.casterPlayerId && fighter.currentState !== 'dead') {
+            let ctrl = fighter.playerId === 0 ? keybinds.p1 : keybinds.p2; let willClash = false;
+            if (fighter.ultMeter >= 100 && (fighter.charName==='Gojo' || fighter.charName==='Yuta' || (fighter.isTransformed && !fighter.hasUsedDomain))) {
+                if (!fighter.isCpu && (inputs.keys[ctrl.p] || inputs.keys[ctrl.o])) willClash = true; else if (fighter.isCpu && Math.random() < 0.05) willClash = true;
+            } if (willClash) { triggerUltimate(fighter); }
+        }
+    });
+}
+
+if (gameEngine.hitStopFrames === 0 && gameEngine.roundStartTimer <= 0) {
+    gameEngine.roster.forEach(fighter => fighter.update());
+    for (let i = gameEngine.projectiles.length - 1; i >= 0; i--) { gameEngine.projectiles[i].update(); if (!gameEngine.projectiles[i].active) gameEngine.projectiles.splice(i, 1); }
+    for (let i = gameEngine.particles.length - 1; i >= 0; i--) { gameEngine.particles[i].update(); if (gameEngine.particles[i].life <= 0) gameEngine.particles.splice(i, 1); }
+}
+if (bfMinigame.isActive) { bfMinigame.update(); }
+
+if (hollowPurpleSystem.isActive) {
+    hollowPurpleSystem.timer++; const orbs = gameEngine.projectiles.filter(p => p.type === 'hp_blue_orb' || p.type === 'hp_red_orb');
+    if (hollowPurpleSystem.step === 1 && orbs.length === 2) {
+        let owner = hollowPurpleSystem.owner; let targetX = owner.x + (40 * owner.facingDir); let targetY = owner.y - 20;
+        let reached = 0;
+        orbs.forEach(orb => { 
+            let dx = targetX - orb.x; let dy = targetY - orb.y; 
+            let dist = Math.sqrt(dx*dx + dy*dy);
+            if (dist < 5) { reached++; orb.x = targetX; orb.y = targetY; } 
+            else { orb.x += (dx / dist) * 1.5; orb.y += (dy / dist) * 1.5; }
+        }); 
+        if (reached === 2 || hollowPurpleSystem.timer > 120) { hollowPurpleSystem.step = 2; hollowPurpleSystem.timer = 0; orbs.forEach(o => o.active = false); gameEngine.cameraShake = 15; soundManager.play('hitHeavy'); }
+    }
+    if (hollowPurpleSystem.step === 2) { if (hollowPurpleSystem.timer === 60){ gameEngine.screenFlash = { color: '#fff', duration: 15, life: 15 }; gameEngine.cameraShake = 30; gameEngine.hitStopFrames = 10; showCinematicMessage("HOLLOW PURPLE", "#a200ff", 120, 24); spawnHitSparks(hollowPurpleSystem.owner.x + (25 * hollowPurpleSystem.owner.facingDir), hollowPurpleSystem.owner.y - 15, '#a200ff', true); hollowPurpleSystem.step = 3; } }
+    if (hollowPurpleSystem.step === 3 && hollowPurpleSystem.timer > 60) { let owner = hollowPurpleSystem.owner; gameEngine.projectiles.push(new CombatProjectile('hollow_purple_blast', owner.x + (20*owner.facingDir), owner.y-10, owner.facingDir, owner)); hollowPurpleSystem.isActive = false; owner.setState('ability_hp_fire'); }
+}
+
+gameEngine.projectiles.forEach(p => p.draw(ctx)); 
+
+if (hollowPurpleSystem.isActive && (hollowPurpleSystem.step === 1 || hollowPurpleSystem.step === 2)) {
+    let owner = hollowPurpleSystem.owner; let cx = owner.x + (40 * owner.facingDir); let cy = owner.y - 20; let progress = 0;
+    if (hollowPurpleSystem.step === 1) { 
+        const orbs = gameEngine.projectiles.filter(p => p.type === 'hp_blue_orb' || p.type === 'hp_red_orb'); 
+        if (orbs.length === 2) { 
+            let dist = Math.abs(orbs[0].x - orbs[1].x); 
+            if (dist < 100) progress = 1 - (dist / 100); 
+        } 
+    } 
+    else if (hollowPurpleSystem.step === 2) { progress = 1 + (hollowPurpleSystem.timer / 60); }
+
+    if (progress > 0) {
+        let scaleR = 40 * progress;
+        drawHollowPurple(ctx, cx, cy, scaleR, gameEngine.frameCount);
+    }
+}
+
+if (domainExpansionSystem.floatingMathSymbols && domainExpansionSystem.floatingMathSymbols.length > 0) {
+    ctx.save();
+    for (let i = domainExpansionSystem.floatingMathSymbols.length - 1; i >= 0; i--) {
+        let sym = domainExpansionSystem.floatingMathSymbols[i];
+        sym.life++; sym.y -= 0.6;
+        ctx.globalAlpha = Math.max(0, 1 - (sym.life / 60));
+        ctx.fillStyle = '#fff'; ctx.font = "10px 'Press Start 2P'"; ctx.fillText(sym.text, sym.x, sym.y);
+        if (sym.life >= 60) domainExpansionSystem.floatingMathSymbols.splice(i, 1);
+    }
+    ctx.restore();
+}
+
+gameEngine.roster.forEach(fighter => fighter.draw(ctx)); gameEngine.particles.forEach(p => p.draw(ctx));
+
+if (domainExpansionSystem.isActive) {
+    let timer = domainExpansionSystem.timer; 
+    let shatterTime = domainExpansionSystem.getShatterTime();
+    let fadeStart = shatterTime - 120;
+    let endTime = domainExpansionSystem.getEndTime();
+
+    if (timer >= fadeStart && timer < shatterTime) {
+        let alpha = (timer - fadeStart) / (shatterTime - fadeStart);
+        ctx.fillStyle = `rgba(255, 255, 255, ${alpha})`;
+        ctx.fillRect(0, 0, LOG_W, LOG_H);
+    } 
+    else if (timer === shatterTime) {
+        domainExpansionSystem.shards =[]; 
+        soundManager.play('hitHeavy'); 
+        gameEngine.cameraShake = 25; 
+        for(let i=0; i<150; i++) { 
+            let pts =[];
+            let pointsCount = 3 + Math.floor(Math.random() * 2);
+            for(let p=0; p<pointsCount; p++) {
+                let ang = (p/pointsCount) * Math.PI * 2 + Math.random()*0.5;
+                let r = 4 + Math.random()*15;
+                pts.push({x: Math.cos(ang)*r, y: Math.sin(ang)*r});
+            }
+            domainExpansionSystem.shards.push({ 
+                x: Math.random() * LOG_W, 
+                y: Math.random() * LOG_H, 
+                vx: (Math.random() - 0.5) * 16, 
+                vy: (Math.random() - 0.5) * 12 - 2, 
+                rot: Math.random() * Math.PI, 
+                vrot: (Math.random() - 0.5) * 0.3, 
+                pts: pts
+            }); 
+        } 
+    } 
+    else if (timer > shatterTime && timer < endTime) {
+        ctx.save();
+        for (let i = 0; i < domainExpansionSystem.shards.length; i++) {
+            let s = domainExpansionSystem.shards[i];
+            s.x += s.vx; s.y += s.vy; s.vy += GRAVITY * 0.3; s.rot += s.vrot;
+            ctx.translate(s.x, s.y); ctx.rotate(s.rot);
+            
+            if (domainExpansionSystem.domainType === 'void') { ctx.fillStyle = 'rgba(255, 255, 255, 0.95)'; ctx.strokeStyle = '#000000'; }
+            else if(domainExpansionSystem.domainType === 'yuta') { ctx.fillStyle = '#ff40a1'; ctx.strokeStyle = '#fff'; }
+            else { ctx.fillStyle = '#000000'; ctx.strokeStyle = '#000000'; }
+            ctx.lineWidth = 1.5;
+            
+            ctx.beginPath();
+            ctx.moveTo(s.pts[0].x, s.pts[0].y);
+            for(let p=1; p<s.pts.length; p++) ctx.lineTo(s.pts[p].x, s.pts[p].y);
+            ctx.closePath();
+            ctx.fill(); ctx.stroke();
+            ctx.rotate(-s.rot); ctx.translate(-s.x, -s.y);
+        }
+        ctx.restore();
+    }
+
+    if (timer >= endTime) {
+        domainExpansionSystem.isActive = false; 
+        soundManager.stopLoop(); 
+        domainExpansionSystem.galaxyLines = null; 
+        domainExpansionSystem.splats = null; 
+        domainExpansionSystem.voidStreaks = null; 
+        domainExpansionSystem.floatingMathSymbols =[];
+    }
+}
+}
+
+if (bfMinigame.isActive) {
+    bfMinigame.draw(ctx);
+}
+
+gameEngine.roster.forEach(fighter => {
+if (fighter.comboHits > 1) { ctx.save(); let shake = fighter.comboHits > 5 ? (Math.random() - 0.5) * 4 : 0; let comboScale = 1.0; if (fighter.comboJustIncremented && fighter.comboTimer > 80) { comboScale = 1.0 + Math.sin((90 - fighter.comboTimer) / 10 * Math.PI) * 0.3; } else { fighter.comboJustIncremented = false; } let comboAlpha = fighter.comboTimer < 25 ? (fighter.comboTimer / 25) : 1.0; ctx.globalAlpha = comboAlpha; ctx.fillStyle = fighter.comboHits > 5 ? '#ff003c' : (fighter.comboHits > 3 ? '#ffaa00' : '#ffffff'); ctx.font = `${(10 + Math.min(fighter.comboHits, 10)) * comboScale}px 'Press Start 2P'`; let drawX = fighter.playerId === 0 ? 10 : 410; ctx.textAlign = fighter.playerId === 0 ? "left" : "right"; ctx.lineWidth = 3; ctx.strokeStyle = "#000"; ctx.strokeText(fighter.comboHits + " HITS", drawX + shake, 80 + shake); ctx.fillText(fighter.comboHits + " HITS", drawX + shake, 80 + shake); ctx.fillStyle = "rgba(255,255,255,0.5)"; let barW = (fighter.comboTimer / 90) * 40; ctx.fillRect(fighter.playerId === 0 ? drawX : drawX - barW, 90, barW, 4); ctx.restore(); } });
+
+if (gameEngine.screenFlash) { ctx.fillStyle = gameEngine.screenFlash.color; ctx.globalAlpha = 0.8 * (gameEngine.screenFlash.life / gameEngine.screenFlash.duration); ctx.fillRect(0, 0, LOG_W, LOG_H); ctx.globalAlpha = 1.0; gameEngine.screenFlash.life--; if (gameEngine.screenFlash.life <= 0) gameEngine.screenFlash = null; }
+if (gameEngine.impactFrame > 0) { ctx.fillStyle = gameEngine.impactFrame === 2 ? '#fff' : '#000'; ctx.fillRect(0, 0, LOG_W, LOG_H); gameEngine.impactFrame--; }
+
+if (gameEngine.cinematicText) { const ct = gameEngine.cinematicText; const progress = 1 - (ct.life / ct.duration); let scale = 1.0; let alpha = 1.0; if (progress < 0.15) { scale = 1 + (1 - (progress / 0.15)) * 0.5; alpha = progress / 0.15; } else if (progress > 0.8) { alpha = (1 - progress) / 0.2; } ctx.save(); ctx.globalAlpha = alpha; ctx.textAlign = "center"; ctx.fillStyle = ct.color; ctx.font = `${ct.size * scale}px 'Press Start 2P'`; ctx.strokeStyle = '#000'; ctx.lineWidth = 8; ctx.strokeText(ct.text, LOG_W / 2, LOG_H / 2); ctx.fillText(ct.text, LOG_W / 2, LOG_H / 2); ctx.restore(); ct.life--; if (ct.life <= 0) gameEngine.cinematicText = null; }
+if (gameEngine.roundStartTimer > 0 && gameEngine.roundStartTimer <= 60) { gameEngine.roundStartTimer--; let count = Math.ceil(gameEngine.roundStartTimer / 60); let text = "FIGHT!"; if (gameEngine.roundStartTimer === 59) { showCinematicMessage(text, '#ffcc00', 55, 50); soundManager.play('hitHeavy'); } }
+
+for (const key in inputs.keys) { if (inputs.keys[key]) inputs.holdDuration[key]++; } updateHUD(); requestAnimationFrame(gameLoop);
+}
+
+function triggerMatchEnd(winner) { if (gameEngine.matchOver) return; gameEngine.matchOver = true; soundManager.stopLoop(); let winnerName = (winner.playerId === 0) ? "PLAYER 1" : (gameMode === 'local' ? "PLAYER 2" : "CPU"); document.getElementById('match-over-text').innerText = `${winnerName} WINS!`; setTimeout(() => { gameEngine.isRunning = false; menuSystem.switchScreen('menu-match-over'); }, 3000); }
+function rematch() { startGameplayLoop(lastMap); }
+function startGameplayLoop(mapName) {
+lastMap = mapName; mapManager.currentMap = mapName; menuSystem.switchScreen('start_gameplay');
+gameEngine.roster = []; gameEngine.projectiles = []; gameEngine.particles =[]; soundManager.stopLoop();
+let playerCharacter = lastPlayerChar; let cpuCharacter = lastCpuChar; if(gameMode === 'versus' || gameMode === 'training') { const cpuCharacters =['Gojo', 'Yuji', 'Yuta'].filter(c => c !== playerCharacter); cpuCharacter = cpuCharacters[Math.floor(Math.random() * cpuCharacters.length)]; }
+
+let p1 = new Fighter(playerCharacter, 80, 0); p1.facingDir = 1; p1.y = GROUND_Y - 30; p1.velY = 0; gameEngine.roster.push(p1);
+
+let p2 = new Fighter(cpuCharacter, 340, 1); p2.facingDir = -1; p2.y = GROUND_Y - 30; p2.velY = 0; if (gameMode === 'local' || gameMode === 'training') p2.isCpu = false; gameEngine.roster.push(p2); 
+
+document.getElementById('hud-name-p1').innerText = playerCharacter.toUpperCase(); document.getElementById('hud-name-p2').innerText = gameMode === 'local' ? "PLAYER 2" : (gameMode === 'training' ? "TRAINING DUMMY" : cpuCharacter.toUpperCase());
+
+gameEngine.frameCount = 0; gameEngine.cameraShake = 0; gameEngine.hitStopFrames = 0; gameEngine.impactFrame = 0; gameEngine.screenFlash = null; gameEngine.cinematicText = null;
+gameEngine.vsScreenTimer = 180; gameEngine.introTimer = 360; gameEngine.roundStartTimer = 60;
+
+domainExpansionSystem.isActive = false; hollowPurpleSystem.isActive = false; domainClashSystem.isActive = false; bfMinigame.isActive = false; domainExpansionSystem.splats = null; domainExpansionSystem.voidStreaks = null;
+gameEngine.matchOver = false; gameEngine.isRunning = true; gameLoop();
+}
+
+function startGameEngine(m) { startGameplayLoop(m); }
+</script>
+
