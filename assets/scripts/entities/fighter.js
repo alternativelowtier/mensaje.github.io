@@ -1,0 +1,4 @@
+const CharacterStatsBase = { ... };
+class Fighter {
+// ...
+}
