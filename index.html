@@ -1,170 +1,210 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="es">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>Jujutsu Kaisen: Cursed Pixel Clash</title>
-<link rel="stylesheet" href="assets/style.css">
-
-<!-- Core Systems -->
-<script defer src="assets/scripts/core/audio.js"></script>
-<script defer src="assets/scripts/core/input.js"></script>
-<script defer src="assets/scripts/core/ui.js"></script>
-<script defer src="assets/scripts/core/map.js"></script>
-
-<!-- Entities -->
-<script defer src="assets/scripts/entities/particles.js"></script>
-<script defer src="assets/scripts/entities/projectiles.js"></script>
-<script defer src="assets/scripts/entities/fighter.js"></script>
-
-<!-- Game Mechanics & Logic -->
-<script defer src="assets/scripts/systems/mechanics.js"></script>
-<script defer src="assets/scripts/core/game.js"></script>
-
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Undertale Dialogue Box</title>
+  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+    body {
+      margin: 0;
+      padding: 0;
+      background-color: #000000;
+      color: #ffffff;
+      height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: 'Press Start 2P', monospace;
+      overflow: hidden;
+      cursor: pointer;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+    .dialog-box {
+      width: 90%;
+      max-width: 650px;
+      min-height: 160px;
+      background-color: #000000;
+      border: 6px solid #ffffff;
+      padding: 30px;
+      position: relative;
+      image-rendering: pixelated;
+    }
+    .dialog-text {
+      font-size: 16px;
+      line-height: 1.8;
+      letter-spacing: 2px;
+      word-break: break-word;
+      white-space: pre-wrap;
+      margin: 0;
+    }
+    .asterisk {
+      color: #ffffff;
+      margin-right: 12px;
+    }
+  </style>
 </head>
 <body>
 
-<div id="init-screen">
-    <div class="pulse-text">CLICK ANYWHERE<br>TO INITIALIZE GAME AUDIO</div>
-</div>
+  <div class="dialog-box" id="dialog-box">
+    <p class="dialog-text"><span class="asterisk">*</span><span id="text-container"></span></p>
+  </div>
 
-<div id="game-container">
-    <div id="menu-main" class="screen-ui active">
-        <h1>JJK: PIXEL DOMAIN</h1>
-        <button class="btn-main btn-play" onclick="initSelectMenu('versus')">VERSUS AI</button>
-        <button class="btn-main btn-local" onclick="initSelectMenu('local')">LOCAL MULTIPLAYER</button>
-        <button class="btn-main btn-train" onclick="initSelectMenu('training')">TRAINING MODE</button>
-        <button class="btn-main btn-controls" onclick="menuSystem.switchScreen('menu-controls')">MOVELIST</button>
-        <button class="btn-main btn-settings" onclick="menuSystem.switchScreen('menu-settings')">SETTINGS</button>
-    </div>
+  <script>
+    const dialogues = [
+      "(Dialogo de relleno para que el codigo no se rompa)",
+      "Hola.",
+      "Hay alguien ahi...?",
+      "Bueno... Solo llamo para decir algo",
+      "Algo que a lo mejor debi haberte dicho hace mucho tiempo.",
+      "Recuerdo que la ultima vez que nos vimos lo ultimo que te dije fue un adios. tu te fuiste a la izquierda y yo me fui a la derecha.",
+      "Nunca tube el valor de decirte nada.",
+      "Tenia tantas ganas de gritarte ''Te amo, porfavor quedate a mi lado y seamos felices''",
+      "Pero ya es demasiado tarde para eso, y aun que lo sea, no puedo simplemente quedarme callado, mi corazon me esta pidiendo a gritos que te diga lo que realmente siento por ti.",
+      "Asi que... Lo dire.",
+      "Lo Dire Absolutamente todo.",
+      "Yo.. Te amo, Te amo demasiado, ya no puedo vivir sin ti.",
+      "Hemos pasado por tantas cosas juntos, momentos buenos, momentos malos, momentos super felices.",
+      "Lo di, y aun quiero darlo todo por ti.",
+      "Que cumplamos lo que alguna vez nos propusimos, tener una familia, una casa bonita, casarnos...",
+      "Todo eso y mas lo quiero contigo, para mi, tu eres una princesa, una princesa que debe tener a su principe.",
+      "Y ese principe quiero ser yo, yo quiero cuidarte y protegerte de todo.",
+      "Ver tu sonrisa, me alegraba tanto...me hacia darme cuenta de que tenia un proposito muy importante.",
+      "Me hacia darme cuenta que debia cuidarte y protegerte a toda costa, para que nunca perdieras ese brillo en tus ojos.",
+      "Fuiste la luz en la oscuridad para mi, me guiaste y me guiaste, atra vez de las noches mas oscuras.",
+      "Fuiste el cielo estrellado mas lindo y brillante de todos el cual siempre me ilumino el camino.",
+      "me duele pensar lo tonto que fui al no decirte ''te amo y no te dejare ir''",
+      "Me sacaste de un vacio inmenso del cual pensaba que no habia escapatoria.",
+      "Tu siempre sabias como hacerme sonreir, hacerme reir.",
+      "Tu tenias el carisma que nadie mas tubo.",
+      "Tu me dabas el amor y el cariño que nadie mas me dio nunca.",
+      "Yo estaba dispuesto a dejarlo absolutamente todo atras con tal de estar contigo.",
+      "Porque eras, y aun lo eres todo para mi.",
+      "Ya no sere un cobarde, ya no pienso dejarme vencer por mis mismas dudas.",
+      "Te amo y te quiero para mi, para mi y nadie mas, no te dejare ir nunca.",
+      "Despues de todo este tiempo, porfin estoy decidido.",
+      "Decidido a ganarme tu corazon, decidido a estar contigo por el resto de mis dias.",
+      "Eres la mujer mas linda y hermosa que he conocido.",
+      "La mas linda de todas, asi que no pienses en decirme que busque a alguien mas.",
+      "Alguien como tu no hay igual, y yo solo te quiero a ti.",
+      "Estoy completamente loco por ti.",
+      "Hare locura tras locura con tal de que me prestes algo de atencion.",
+      "Hare que me vuelvas a mirar con esos ojos que tanto me gustaban.",
+      "Hare que vuelvas a amarme..",
+      "Y yo me esforzare para ser perfecto.",
+      "Para volverme lo que tu siempre has querido y necesitado..",
+      "Me volvere el hombre de tu sueños cueste lo que cueste.",
+      "...",
+      "Gracias por haberme hecho el chico mas feliz del mundo en ese entonces.",
+      "Ahora, yo soy el que quiere hacerte feliz a ti.",
+      "Que te olvides de absolutamente todos los problemas.. y que seas tu misma conmigo como siempre hiciste.",
+      "Te amo, y esto no es un adios, solo es un...",
+      "Hasta pronto",
+      "(Click...)"
+      
+     
+    ];
 
-    <div id="menu-settings" class="screen-ui">
-        <h2>GAME CONFIGURATION</h2>
-        <div class="info-panel settings-expanded" style="min-width: 700px;">
-            <div class="settings-row"><span style="color:#ffea00; font-size:1rem;">Master Volume:</span><input type="range" min="0" max="1" step="0.01" value="0.7" onchange="soundManager.setVolume(this.value)"></div>
-            <div class="settings-row"><span>CRT TV Overlay Effect:</span><input type="checkbox" id="setting-crt-checkbox" style="transform: scale(1.5);" onchange="gameConfig.toggleCRT()"></div>
-            <hr>
-            <div style="display: flex; justify-content: space-around; margin-top:20px;" id="keybinds-container"></div>
-        </div>
-        <button class="btn-main btn-back" onclick="menuSystem.switchScreen('menu-main')">BACK TO MAIN MENU</button>
-    </div>
+    let currentDialogueIndex = 0;
+    let displayedText = "";
+    let isTyping = false;
+    let charIndex = 0;
+    let typingTimer = null;
 
-    <div id="menu-controls" class="screen-ui">
-        <h2>COMBAT MECHANICS</h2>
-        <div class="info-panel">
-            <span style="color:#ffd000">MOVEMENT:</span> [A / D] walk | [W] Jump | <strong>Double Tap A/D to Dash</strong>.<br>
-            <span style="color:#00ff55">GUARD [S]:</span> Drains fast while being attacked! If reaches 0 -> Shield Break Stun.<br>
-            <strong style="color:#00ff55">PERFECT BLOCK (PARRY): Press [S + J] at the same time to parry Light/Heavy attacks & stun! Costs 1 Parry Charge (max 2). Regen by taking/dealing/blocking damage!</strong><br>
-            <hr>
-            <span style="color:#ff2222">MELEE:</span> [J] Light (4-hit combo, last hit launches!) | [K] Heavy | [L] Grab/Throw.<br>
-            <strong style="color:#000; text-shadow: 0 0 2px red">[K] has a 10% chance to trigger a BLACK FLASH on hit!</strong><br>
-            <hr>
-            <span style="color:#00ddff">GOJO ABILITIES:</span><br>
-            <strong>[U] BLUE:</strong> Hold to charge immense slow-orb. <strong style="color:#ffcc00">Tap for unblockable Combo Pull!</strong><br>
-            <strong>[I] RED:</strong> Hold to charge for Massive Blast, <strong style="color:red">tap for an Instant Point-Blank Explosion.</strong><br>
-            <strong>[O] INFINITY:</strong> Invulnerable forcefield for 5 seconds. <strong style="color:#a200ff">At 100% SP, becomes HOLLOW PURPLE.</strong><br>
-            <strong>[P] ULTIMATE:</strong> Unlimited Void Domain Expansion!<br>
-            <hr>
-            <span style="color:#ff2222">YUJI / SUKUNA ABILITIES:</span><br>
-            <strong>[U] CURSED FLAME SLAM:</strong> Leap heavy ground slam! (Sukuna = Dismantle)<br>
-            <strong>[I] DIVERGENT FIST:</strong> Tap = Delayed impact. <strong style="color:#000; text-shadow: 0 0 2px red">Tap [I] AGAIN to trigger BLACK FLASH!</strong> (Sukuna = Cleave)<br>
-            <strong>[O] COUNTER STANCE:</strong> Deflect attacks (Sukuna = Fire Arrow at 50%).<br>
-            <strong>[P] ULTIMATE:</strong> Overtaken by Sukuna! <strong>If Sukuna, maps to Malevolent Shrine at Full ULT.</strong><br>
-            <hr>
-            <span style="color:#ffffff">YUTA OKKOTSU:</span><br>
-            <strong>[U] RIKA PUNCH / COPY:</strong> Summons Rika for a heavy strike! If it hits an opponent, Yuta permanently copies their [U] technique for 2 usages!<br>
-            <strong>[I] IAI SLASH:</strong> A rapid, forward-dashing sword strike.<br>
-            <strong>[O] REVERSE CURSED TECHNIQUE:</strong> Consumes 100% Special Bar to heal a moderate amount of health.<br>
-            <strong>[P] ULTIMATE:</strong> Domain Expansion: True and Mutual Love! Inside the domain, Yuta's abilities change.<br>
-            &nbsp;&nbsp;&nbsp;&nbsp;<strong style="color:#ffcc00">[P] RE-ARM:</strong> Pull a new katana from the ground to gain a new, random Cursed Technique (1 use).<br>
-            &nbsp;&nbsp;&nbsp;&nbsp;<strong style="color:#ffcc00">[U] CURSED TECHNIQUE COPY:</strong> Use the copied technique. Can be anything from Lapse Blue to Hollow Purple!<br>
-            &nbsp;&nbsp;&nbsp;&nbsp;<strong style="color:#ffcc00">[I] JACOB'S LADDER:</strong> A pillar of light from the heavens that nullifies cursed energy, draining the opponent's meters on hit.<br>
-            &nbsp;&nbsp;&nbsp;&nbsp;<strong style="color:#ffcc00">[O] TRUE LOVE BEAM:</strong> Rika unleashes a devastating beam of pure love energy after a short charge.<br>
-        </div>
-        <button class="btn-main btn-back" onclick="menuSystem.switchScreen('menu-main')">BACK TO MAIN MENU</button>
-    </div>
+    const textContainer = document.getElementById('text-container');
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
 
-    <div id="menu-character-select" class="screen-ui">
-        <h2 id="char-select-title">PLAYER 1 SELECT</h2>
-        <div style="display:flex; flex-direction:column; gap:10px;">
-            <button class="btn-main" style="border-color:#ff003c; color: #ff003c; min-width:250px" onclick="handleCharacterPick('Yuji')">YUJI ITADORI</button>
-            <button class="btn-main" style="border-color:#00ddff; color: #00ddff; min-width:250px" onclick="handleCharacterPick('Gojo')">SATORU GOJO</button>
-            <button class="btn-main" style="border-color:#dddddd; color: #dddddd; min-width:250px" onclick="handleCharacterPick('Yuta')">YUTA OKKOTSU</button>
-        </div>
-        <button class="btn-main btn-back" onclick="menuSystem.switchScreen('menu-main')">BACK TO MAIN MENU</button>
-    </div>
+    function playTypewriterSound(char) {
+      if (!char || char.trim() === '' || /[.,\/#!$%\^&\*;:{}=\-_`~()?"']/.test(char)) {
+        return;
+      }
+      try {
+        if (audioCtx.state === 'suspended') {
+          audioCtx.resume();
+        }
+        const osc = audioCtx.createOscillator();
+        const gainNode = audioCtx.createGain();
 
-    <div id="menu-map-select" class="screen-ui">
-        <h2>SELECT BATTLEFIELD</h2>
-        <div>
-            <button class="btn-main" style="border-color:#ff003c; color:#ff003c;" onclick="startGameEngine('cursed_womb')">CURSED WOMB</button>
-            <button class="btn-main" style="border-color:#00ddff; color:#00ddff;" onclick="startGameEngine('rooftop')">SCHOOL ROOFTOP</button>
-            <button class="btn-main" style="border-color:#ffea00; color:#ffea00;" onclick="startGameEngine('shibuya')">SHIBUYA CROSSING</button>
-            <button class="btn-main" style="border-color:#ffffaa; color:#e0c98f;" onclick="startGameEngine('hidden_inventory')">HIDDEN INVENTORY</button>
-        </div>
-        <button class="btn-main btn-back" onclick="menuSystem.switchScreen('menu-character-select'); currentSelectionState = 1; document.getElementById('char-select-title').innerText = gameMode==='local' ? 'PLAYER 1 SELECT' : 'SELECT CHARACTER'; document.getElementById('char-select-title').style.color = '#00d4ff';">BACK TO CHARACTER SELECT</button>
-    </div>
+      
+        osc.type = 'square';
+        osc.frequency.setValueAtTime(100 + (Math.random() - 0.8) * 9, audioCtx.currentTime);
 
-    <div id="menu-match-over" class="screen-ui">
-        <h2 id="match-over-text">MATCH OVER</h2>
-        <button class="btn-main btn-play" onclick="rematch()">REMATCH</button>
-        <button class="btn-main btn-back" onclick="menuSystem.switchScreen('menu-main')">MAIN MENU</button>
-    </div>
+        gainNode.gain.setValueAtTime(0, audioCtx.currentTime);
+        gainNode.gain.linearRampToValueAtTime(0.15, audioCtx.currentTime + 0.003);
+        gainNode.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.05);
 
-    <div id="combat-hud">
-        <div id="player1-hud" class="hud-wrapper">
-            <div class="player-name-text" id="hud-name-p1" style="color: #00d4ff;">PLAYER 1</div>
-            <div class="hud-container">
-                <div class="hud-bar-background"><div id="hud-hp-p1" class="hud-bar-fill color-hp"></div></div>
-                <div style="display:flex; gap:2px;">
-                    <div class="hud-bar-background" style="width:25%"><div class="hud-bar-text" style="color:#000;">GUARD</div><div id="hud-guard-p1" class="hud-bar-fill color-guard"></div></div>
-                    <div class="hud-bar-background" style="width:20%"><div class="hud-bar-text" style="color:#000;">PARRY</div><div id="hud-parry-p1" class="hud-bar-fill color-parry"></div></div>
-                    <div class="hud-bar-background" style="width:30%"><div class="hud-bar-text">SPECIAL</div><div id="hud-sp-p1" class="hud-bar-fill color-special"></div></div>
-                    <div class="hud-bar-background" style="width:25%"><div class="hud-bar-text">ULT [P]</div><div id="hud-ult-p1" class="hud-bar-fill color-ultimate"></div></div>
-                </div>
-                <div id="hud-sukuna-domain-container-p1" style="display:none; width:100%; margin-top:2px;">
-                    <div class="hud-bar-background" style="width:100%; height:14px; border-color:#ff003c;">
-                        <div class="hud-bar-text" style="top:2px; font-size:0.5rem; color:#fff; text-shadow: 1px 1px 0 #000;">DOMAIN EXPANSION [P]</div>
-                        <div id="hud-sukuna-domain-p1" class="hud-bar-fill" style="background:#ff003c;"></div>
-                    </div>
-                </div>
-                <div id="hud-yuta-copy-container-p1" style="display:none; width:100%; margin-top:2px;">
-                    <div class="hud-bar-background" style="width:100%; height:14px; border-color:#ff00aa;">
-                        <div class="hud-bar-text" style="top:2px; font-size:0.5rem; color:#fff; text-shadow: 1px 1px 0 #000;" id="hud-yuta-copy-text-p1">COPY: NONE</div>
-                        <div id="hud-yuta-copy-p1" class="hud-bar-fill" style="background:#ff00aa; width:100%; opacity:0.3;"></div>
-                    </div>
-                </div>
-            </div>
-        </div>
-        
-        <div id="player2-hud" class="hud-wrapper">
-            <div class="player-name-text" id="hud-name-p2" style="color: #ff3333;">CPU</div>
-            <div class="hud-container p2">
-                <div class="hud-bar-background"><div id="hud-hp-p2" class="hud-bar-fill color-hp"></div></div>
-                <div style="display:flex; gap:2px; flex-direction:row-reverse; width:100%">
-                    <div class="hud-bar-background" style="width:25%"><div class="hud-bar-text" style="color:#000;">GUARD</div><div id="hud-guard-p2" class="hud-bar-fill color-guard"></div></div>
-                    <div class="hud-bar-background" style="width:20%"><div class="hud-bar-text" style="color:#000;">PARRY</div><div id="hud-parry-p2" class="hud-bar-fill color-parry" style="float:right;"></div></div>
-                    <div class="hud-bar-background" style="width:30%"><div class="hud-bar-text">SPECIAL</div><div id="hud-sp-p2" class="hud-bar-fill color-special" style="float:right;"></div></div>
-                    <div class="hud-bar-background" style="width:25%"><div class="hud-bar-text">ULT</div><div id="hud-ult-p2" class="hud-bar-fill color-ultimate" style="float:right;"></div></div>
-                </div>
-                <div id="hud-sukuna-domain-container-p2" style="display:none; width:100%; margin-top:2px;">
-                    <div class="hud-bar-background" style="width:100%; height:14px; border-color:#ff003c;">
-                        <div class="hud-bar-text" style="top:2px; font-size:0.5rem; color:#fff; text-shadow: 1px 1px 0 #000;">DOMAIN EXPANSION [P]</div>
-                        <div id="hud-sukuna-domain-p2" class="hud-bar-fill" style="background:#ff003c; float:right;"></div>
-                    </div>
-                </div>
-                <div id="hud-yuta-copy-container-p2" style="display:none; width:100%; margin-top:2px;">
-                    <div class="hud-bar-background" style="width:100%; height:14px; border-color:#ff00aa;">
-                        <div class="hud-bar-text" style="top:2px; font-size:0.5rem; color:#fff; text-shadow: 1px 1px 0 #000;" id="hud-yuta-copy-text-p2">COPY: NONE</div>
-                        <div id="hud-yuta-copy-p2" class="hud-bar-fill" style="background:#ff00aa; width:100%; opacity:0.3; float:right;"></div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
+        osc.connect(gainNode);
+        gainNode.connect(audioCtx.destination);
 
-    <div class="crt-effect" id="crt-layer-overlay"></div>
-    <canvas id="game-canvas"></canvas>
-</div>
+        osc.start();
+        osc.stop(audioCtx.currentTime + 0.05);
+      } catch (e) {
+        console.warn("Audio Context error", e);
+      }
+    }
+
+    function startDialogue() {
+      if (typingTimer) clearTimeout(typingTimer);
+      
+      const fullText = dialogues[currentDialogueIndex];
+      displayedText = "";
+      textContainer.textContent = "";
+      isTyping = true;
+      charIndex = 0;
+
+      function tick() {
+        if (charIndex < fullText.length) {
+          const nextChar = fullText[charIndex];
+          displayedText += nextChar;
+          textContainer.textContent = displayedText;
+          
+          playTypewriterSound(nextChar);
+          
+          charIndex++;
+
+          let delay = 50;
+          if (nextChar === ',' || nextChar === ';') {
+            delay = 180;
+          } else if (nextChar === '.' || nextChar === '!' || nextChar === '?' || nextChar === ')') {
+            delay = 250;
+          }
+
+          typingTimer = setTimeout(tick, delay);
+        } else {
+          isTyping = false;
+        }
+      }
+
+      tick();
+    }
+
+    function handleInteraction() {
+      if (audioCtx.state === 'suspended') {
+        audioCtx.resume();
+      }
+
+      if (isTyping) {
+        if (typingTimer) clearTimeout(typingTimer);
+        textContainer.textContent = dialogues[currentDialogueIndex];
+        isTyping = false;
+        return;
+      }
+
+      
+      currentDialogueIndex = (currentDialogueIndex + 1) % dialogues.length;
+      startDialogue();
+    }
+
+   
+    window.addEventListener('click', handleInteraction);
+    window.addEventListener('touchstart', handleInteraction);
+
+   
+    textContainer.textContent = "(Ring Ring...)";
+  </script>
 </body>
 </html>
